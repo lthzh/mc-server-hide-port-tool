@@ -30,8 +30,40 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # 探测每个 GitHub secret 是否被设置；只把已配置的放进 wrangler-action 的 vars/secrets 名单。
+      # 未配置 GitHub OAuth 时自动跳过 GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET，
+      # 进而 wrangler deploy 时 worker 侧不再有这两个 secret → 后台选 GitHub 注册方式会自动跳过。
+      - name: Build dynamic secret/var lists
+        id: lists
+        env:
+          DOMAINS: ${{ secrets.DOMAINS }}
+          BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
+          GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
+          CLOUDFLARE_API_TOKEN_EXAMPLE1_COM: ${{ secrets.CLOUDFLARE_API_TOKEN_EXAMPLE1_COM }}
+          CLOUDFLARE_API_TOKEN_EXAMPLE2_COM: ${{ secrets.CLOUDFLARE_API_TOKEN_EXAMPLE2_COM }}
+        run: |
+          set -euo pipefail
+          {
+            echo "vars<<LIST_EOF"
+            [ -n "${DOMAINS:-}" ] && echo "DOMAINS"
+            [ -n "${BETTER_AUTH_URL:-}" ] && echo "BETTER_AUTH_URL"
+            echo "LIST_EOF"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "secrets<<LIST_EOF"
+            [ -n "${BETTER_AUTH_SECRET:-}" ] && echo "BETTER_AUTH_SECRET"
+            [ -n "${GITHUB_CLIENT_ID:-}" ] && echo "GITHUB_CLIENT_ID"
+            [ -n "${GITHUB_CLIENT_SECRET:-}" ] && echo "GITHUB_CLIENT_SECRET"
+            # 每个根域名 token 是否设置都单独判断；只有设置了的才注入
+            [ -n "${CLOUDFLARE_API_TOKEN_EXAMPLE1_COM:-}" ] && echo "example1_com_CLOUDFLARE_API_TOKEN"
+            [ -n "${CLOUDFLARE_API_TOKEN_EXAMPLE2_COM:-}" ] && echo "example2_com_CLOUDFLARE_API_TOKEN"
+            echo "LIST_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       # 一次性部署：D1 写回 + custom domain patch + 应用迁移 + deploy + 注入 secrets/vars
-      # .dev.vars.example 里的键名 → GitHub env 名映射规则（与 scripts/resolve_env_keys.py 一致）：
+      # .dev.vars.example 里的键名 → GitHub env 名映射规则：
       #   *_CLOUDFLARE_API_TOKEN   ->  CLOUDFLARE_API_TOKEN_<域名大写>（避免数字开头）
       #   DOMAINS / BETTER_AUTH_URL -> 同名大写
       # secrets 与 vars 字段每行只写「变量名」，对应的值通过该 step 的 env: 提供。
@@ -61,13 +93,6 @@ jobs:
             node scripts/patch-custom-domain.cjs
             npx wrangler d1 migrations apply hide-port-tool-db --remote
           command: deploy --minify
-          # 每行一个变量名（不是 key=value），值已在 env: 中按同名提供
-          vars: |
-            DOMAINS
-            BETTER_AUTH_URL
-          secrets: |
-            BETTER_AUTH_SECRET
-            GITHUB_CLIENT_ID
-            GITHUB_CLIENT_SECRET
-            example1_com_CLOUDFLARE_API_TOKEN
-            example2_com_CLOUDFLARE_API_TOKEN
+          # vars / secrets 列表由上一步动态生成：只有 GitHub 仓库里已配置的同名 secret 才会出现
+          vars: ${{ steps.lists.outputs.vars }}
+          secrets: ${{ steps.lists.outputs.secrets }}
