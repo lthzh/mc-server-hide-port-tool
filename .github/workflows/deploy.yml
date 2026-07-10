@@ -3,7 +3,6 @@ name: Deploy to Cloudflare Workers
 on:
   workflow_dispatch:
 
-# 防止同一分支并发部署冲突
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
@@ -30,21 +29,22 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # 探测每个 GitHub secret 是否被设置；只把已配置的放进 wrangler-action 的 vars/secrets 名单。
-      # 未配置 GitHub OAuth 时自动跳过 GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET，
-      # 进而 wrangler deploy 时 worker 侧不再有这两个 secret → 后台选 GitHub 注册方式会自动跳过。
-      - name: Build dynamic secret/var lists
+      - name: Build dynamic var/secret lists
         id: lists
         env:
           DOMAINS: ${{ secrets.DOMAINS }}
+          CLOUDFLARE_DOMAINS_API_TOKEN: ${{ secrets.CLOUDFLARE_DOMAINS_API_TOKEN }}
           BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
           GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
-          CLOUDFLARE_API_TOKEN_EXAMPLE1_COM: ${{ secrets.CLOUDFLARE_API_TOKEN_EXAMPLE1_COM }}
-          CLOUDFLARE_API_TOKEN_EXAMPLE2_COM: ${{ secrets.CLOUDFLARE_API_TOKEN_EXAMPLE2_COM }}
         run: |
           set -euo pipefail
+          # 解析 CLOUDFLARE_DOMAINS_API_TOKEN，输出多行 wrangler secret 名 + JSON 值文件
+          out="$(python scripts/parse_domain_tokens.py "$CLOUDFLARE_DOMAINS_API_TOKEN" --domains "$DOMAINS")"
+          secret_names="$(printf '%s' "$out" | sed -n '1p')"
+          values_json="$(printf '%s' "$out" | sed -n '2p')"
+          printf '%s' "$values_json" > /tmp/domain_tokens.json
           {
             echo "vars<<LIST_EOF"
             [ -n "${DOMAINS:-}" ] && echo "DOMAINS"
@@ -56,43 +56,32 @@ jobs:
             [ -n "${BETTER_AUTH_SECRET:-}" ] && echo "BETTER_AUTH_SECRET"
             [ -n "${GITHUB_CLIENT_ID:-}" ] && echo "GITHUB_CLIENT_ID"
             [ -n "${GITHUB_CLIENT_SECRET:-}" ] && echo "GITHUB_CLIENT_SECRET"
-            # 每个根域名 token 是否设置都单独判断；只有设置了的才注入
-            [ -n "${CLOUDFLARE_API_TOKEN_EXAMPLE1_COM:-}" ] && echo "example1_com_CLOUDFLARE_API_TOKEN"
-            [ -n "${CLOUDFLARE_API_TOKEN_EXAMPLE2_COM:-}" ] && echo "example2_com_CLOUDFLARE_API_TOKEN"
+            echo "$secret_names"
             echo "LIST_EOF"
           } >> "$GITHUB_OUTPUT"
+          echo "domain_tokens_json=/tmp/domain_tokens.json" >> "$GITHUB_OUTPUT"
 
-      # 一次性部署：D1 写回 + custom domain patch + 应用迁移 + deploy + 注入 secrets/vars
-      # .dev.vars.example 里的键名 → GitHub env 名映射规则：
-      #   *_CLOUDFLARE_API_TOKEN   ->  CLOUDFLARE_API_TOKEN_<域名大写>（避免数字开头）
-      #   DOMAINS / BETTER_AUTH_URL -> 同名大写
-      # secrets 与 vars 字段每行只写「变量名」，对应的值通过该 step 的 env: 提供。
       - name: Deploy Worker (vars + secrets + migrations)
         uses: cloudflare/wrangler-action@v3
         env:
-          # ---- Cloudflare 部署凭据（wrangler 用）----
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # ---- vars（明文，注入为 Worker 普通环境变量）----
           DOMAINS: ${{ secrets.DOMAINS }}
           BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
-          # ---- secrets（敏感，注入为 Worker 加密环境变量）----
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
           GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
-          # 业务变量名映射（wrangler-action 按名字取本 step 的 env）
-          example1_com_CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_EXAMPLE1_COM }}
-          example2_com_CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_EXAMPLE2_COM }}
+          DOMAIN_TOKENS_JSON: ${{ steps.lists.outputs.domain_tokens_json }}
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # 先写回 d1 的 database_id（若不存在则远端创建），再 patch custom domain routes，
-          # 再远端应用迁移，最后部署（部署会一并创建 custom domain）
           preCommands: |
             node scripts/ensure-d1-and-writeback.cjs
             node scripts/patch-custom-domain.cjs
             npx wrangler d1 migrations apply hide-port-tool-db --remote
           command: deploy --minify
-          # vars / secrets 列表由上一步动态生成：只有 GitHub 仓库里已配置的同名 secret 才会出现
+          postCommands: |
+            # 把每个根域名 token 用 wrangler secret put 注入 worker（值来自动态生成的 JSON）
+            python scripts/put_domain_secrets.py "$DOMAIN_TOKENS_JSON"
           vars: ${{ steps.lists.outputs.vars }}
           secrets: ${{ steps.lists.outputs.secrets }}

@@ -131,7 +131,7 @@ pnpm deploy
 
 ### 方式二：GitHub Actions 一键部署（推荐生产环境）
 
-仓库已附带 `.github/workflows/deploy.yml`，推送到 `main` / `master` 分支或在 Actions 页面手动触发即可自动完成：**幂等创建 D1 并写回 `database_id` → 应用远端迁移 → 部署 Worker → 注入 secrets/vars**。
+仓库已附带 `.github/workflows/deploy.yml`，在 Actions 页面手动触发即可自动完成：**幂等创建 D1 并写回 `database_id` → 解析根域名 token → 应用远端迁移 → 部署 Worker → 注入 secrets/vars**。
 
 #### 需要在仓库 Settings → Secrets 中配置的变量
 
@@ -144,25 +144,35 @@ pnpm deploy
 
 **B. 业务环境变量**
 
-`.dev.vars.example` 里出现的每个键 `K`，对应在仓库 secrets 中直接用同名（GitHub Actions secret / env 名仅允许 `[A-Z0-9_]`，故把键名全大写即可）：
-
-| `.dev.vars.example` 键 | GitHub Secret 名 | 是否敏感 |
+| GitHub Secret 名 | 是否敏感 | 说明 |
 |---|---|---|
-| `example1_com_CLOUDFLARE_API_TOKEN` | `EXAMPLE1_COM_CLOUDFLARE_API_TOKEN` | ✅ 走 `wrangler secret put` |
-| `example2_com_CLOUDFLARE_API_TOKEN` | `EXAMPLE2_COM_CLOUDFLARE_API_TOKEN` | ✅ 走 `wrangler secret put` |
-| `BETTER_AUTH_SECRET` | `BETTER_AUTH_SECRET` | ✅ |
-| `GITHUB_CLIENT_ID` | `GITHUB_CLIENT_ID` | ✅ |
-| `GITHUB_CLIENT_SECRET` | `GITHUB_CLIENT_SECRET` | ✅ |
-| `DOMAINS` | `DOMAINS` | ❌ 明文 var（自动写入 wrangler.jsonc） |
-| `BETTER_AUTH_URL` | `BETTER_AUTH_URL` | ❌ 明文 var |
+| `DOMAINS` | ❌ 明文 var | JSON 数组字符串，如 `["303302.xyz","example.com"]` |
+| `BETTER_AUTH_URL` | ❌ 明文 var | worker 对外访问 URL；若指向非 `*.workers.dev` 的自有域名，CI 会把它作为 custom domain 自动绑定到 worker |
+| `BETTER_AUTH_SECRET` | ✅ secret | better-auth 会话签名密钥 |
+| `CLOUDFLARE_DOMAINS_API_TOKEN` | ✅ secret | **汇总所有根域名 Cloudflare API Token 的单一变量**，格式见下 |
+| `GITHUB_CLIENT_ID` | ✅ secret（可选） | 仅在后台开启 GitHub 注册时需要，未设置则自动跳过 |
+| `GITHUB_CLIENT_SECRET` | ✅ secret（可选） | 同上，未设置则自动跳过 |
 
-> 判定是否敏感的规则：键名包含 `CLOUDFLARE_API_TOKEN` / `BETTER_AUTH_SECRET` / `GITHUB_CLIENT_SECRET` / `GITHUB_CLIENT_ID` 视为 secret，其余走明文 var。
-> `DOMAINS` 等 JSON 数组类变量在写入时会自动 `JSON.parse`，可直接传 `["a.com","b.com"]` 字符串。
-> `*_CLOUDFLARE_API_TOKEN` 类键命名约定：GitHub secret 名把 `CLOUDFLARE_API_TOKEN` 前置以避免数字开头，例如 `303302_xyz_CLOUDFLARE_API_TOKEN` → `CLOUDFLARE_API_TOKEN_303302_XYZ`。
+> CI 会探测每个 secret 是否非空，未配置的会自动跳过（GitHub OAuth、未启用 Resend 等）。
 
-**BETTER_AUTH_URL 自动绑定 custom domain**：CI 部署前会把 `BETTER_AUTH_URL` 解析出主机名，写入 `wrangler.jsonc` 的 `routes: [{ pattern, custom_domain: true }]`，由 `wrangler deploy` 一并创建/绑定 custom domain（含 DNS 与证书）。指向 workers.dev 或未配置 BETTER_AUTH_URL 时会安全跳过。
+#### `CLOUDFLARE_DOMAINS_API_TOKEN` 格式
 
-**新增根域名时**：在 `.dev.vars.example` 新增 `<域名点换下划线>_CLOUDFLARE_API_TOKEN=` 一行，并在仓库添加对应同名（大写形式）secret 即可，无需改动 workflow。
+所有根域名的 Cloudflare DNS API Token 用一个变量汇总，省去为每个域名单独建 GitHub secret 的麻烦：
+
+```
+<域名1>:<token1>,<域名2>:<token2>,...
+```
+
+例如，仓库 secret `CLOUDFLARE_DOMAINS_API_TOKEN` 的值：
+```
+303302.xyz:abc123_your_token_here,example.com:def456_your_token_here
+```
+
+每个域名前的 `:` 切分为「域名:token」，域名后保留原样小写。CI 解析后，将每个 token 以 `<域名点换下划线>_CLOUDFLARE_API_TOKEN`（小写）的 secret 名注入到 Worker（与运行时代码读取的命名一致）。例如 `303302.xyz` 对应 worker 内 `303302_xyz_CLOUDFLARE_API_TOKEN`。
+
+> **必须保证 `DOMAINS` 列出的每个根域名都出现在 `CLOUDFLARE_DOMAINS_API_TOKEN` 中**，否则该域名创建 DNS 记录时会因找不到 token 而失败。CI 会在日志中警告缺漏。
+
+**新增根域名时**：把新域名加进 `DOMAINS`，再把它对应的 Token 拼接到 `CLOUDFLARE_DOMAINS_API_TOKEN` 末尾（`,` 分隔）即可，无需改动 workflow。
 
 详见 [`docs/deploy-github-actions.md`](docs/deploy-github-actions.md)。
 
@@ -187,9 +197,11 @@ pnpm deploy
 | `GITHUB_CLIENT_ID` | GitHub OAuth client id | 仅在后台开启 GitHub 注册时需要 |
 | `GITHUB_CLIENT_SECRET` | GitHub OAuth client secret | 同上 |
 
+> **多根域名 Token 在 CI 的统一存储**：GitHub Actions 部署时，所有根域名 Token 用单个 secret `CLOUDFLARE_DOMAINS_API_TOKEN` 汇总（格式 `<域名>:<token>,<域名>:<token>`），由 CI 解析后再按 `<域名点换下划线>_CLOUDFLARE_API_TOKEN` 注入到 Worker；本地开发则按 `.dev.vars` 的多行格式各自独立。
+
 ### 多根域名命名约定
 
-每个根域名使用独立的 Cloudflare API Token，变量名按 `<域名中的点替换为下划线>_CLOUDFLARE_API_TOKEN`：
+Worker 运行时按 `<域名中的点替换为下划线>_CLOUDFLARE_API_TOKEN`（小写）读取每个根域名的 Cloudflare API Token：
 
 ```
 example_com_CLOUDFLARE_API_TOKEN=...
