@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { createAuth, getCurrentUser, getCurrentSession, requireAdmin } from './auth'
+import { createAuth, getCurrentUser, getCurrentSession, requireAdmin, isSuperAdminUser } from './auth'
 import { Layout } from './views/Layout'
 import { IndexView } from './views/IndexView'
 import { LoginView } from './views/LoginView'
@@ -28,7 +28,9 @@ import {
   isSuperAdmin,
   countUsers,
   countRecordsByUser,
-  resolveRecordLimit,
+  hasUnlimitedDnsLimits,
+  resolveMinSubdomainLength,
+  resolveUserRecordLimit,
   deleteUserCascade,
   genId,
   type DnsRecordRow,
@@ -103,14 +105,16 @@ app.get('/api/domains', async (c) => {
   const settings = await getSettings(c.env.DB)
   const session = await getCurrentSession(c.env, c.req.raw.headers)
   let recordLimit: number | null = null
+  let minSubdomainLength = Math.max(0, settings.min_subdomain_length)
   if (session) {
     const userRow = await findUserById(c.env.DB, session.user.id)
-    recordLimit = resolveRecordLimit(userRow?.record_limit ?? null, settings.max_records_per_user)
+    recordLimit = resolveUserRecordLimit(userRow, settings.max_records_per_user)
+    minSubdomainLength = resolveMinSubdomainLength(userRow, settings.min_subdomain_length)
   }
   return c.json({
     success: true,
     domains,
-    min_subdomain_length: settings.min_subdomain_length,
+    min_subdomain_length: minSubdomainLength,
     record_limit: recordLimit,
     max_records_per_user: settings.max_records_per_user
   })
@@ -123,6 +127,7 @@ app.post('/api/create-dns', async (c) => {
       return c.json({ success: false, message: '未登录，请先登录' }, 401)
     }
     const userId = session.user.id
+    const userRow = await findUserById(c.env.DB, userId)
 
     const body = await c.req.json()
     const domains = getAllowedDomains(c.env)
@@ -147,7 +152,7 @@ app.post('/api/create-dns', async (c) => {
 
     // 子域名最小长度校验
     const settings = await getSettings(c.env.DB)
-    const minLen = Math.max(0, settings.min_subdomain_length)
+    const minLen = resolveMinSubdomainLength(userRow, settings.min_subdomain_length)
     // subdomain 可包含多级如 play.mc，整体长度按用户填写的子域名原始字符串判断
     const subdomainInput = String((body as Record<string, unknown>).subdomain ?? '').trim()
     if (minLen > 0 && subdomainInput.length < minLen) {
@@ -161,10 +166,7 @@ app.post('/api/create-dns', async (c) => {
     }
 
     // 记录数上限校验
-    const userRecordLimit = resolveRecordLimit(
-      (session.user as any).record_limit as number | null | undefined,
-      settings.max_records_per_user
-    )
+    const userRecordLimit = resolveUserRecordLimit(userRow, settings.max_records_per_user)
     if (userRecordLimit > 0) {
       const currentCount = await countRecordsByUser(c.env.DB, userId)
       if (currentCount >= userRecordLimit) {
@@ -667,6 +669,7 @@ app.get('/admin', async (c) => {
         records={records}
         settings={settings}
         currentUserId={user.id}
+        currentUserSuperAdmin={isSuperAdminUser(user)}
         createError={c.req.query('create_error') ?? undefined}
       />
     </Layout>
@@ -714,6 +717,7 @@ app.post('/admin/settings', async (c) => {
 app.post('/admin/users/:id/role', async (c) => {
   const admin = await requireAdmin(c.env, c.req.raw.headers)
   if (!admin) return c.redirect('/')
+  if (!isSuperAdminUser(admin)) return c.redirect('/admin')
   const id = c.req.param('id')
   if (id === admin.id) return c.redirect('/admin')
   // 超级管理员不能被其他管理员降级
@@ -732,6 +736,9 @@ app.post('/admin/users/:id/delete', async (c) => {
   if (!admin) return c.redirect('/')
   const id = c.req.param('id')
   if (id === admin.id) return c.redirect('/admin')
+  const target = await findUserById(c.env.DB, id)
+  if (!target) return c.redirect('/admin')
+  if (target.role === 'admin' && !isSuperAdminUser(admin)) return c.redirect('/admin')
   // 禁止删除超级管理员
   const targetSuper = await isSuperAdmin(c.env.DB, id)
   if (targetSuper) return c.redirect('/admin')
@@ -748,6 +755,8 @@ app.post('/admin/users/:id/limit', async (c) => {
   const admin = await requireAdmin(c.env, c.req.raw.headers)
   if (!admin) return c.redirect('/')
   const id = c.req.param('id')
+  const target = await findUserById(c.env.DB, id)
+  if (!target || hasUnlimitedDnsLimits(target)) return c.redirect('/admin')
   const form = await c.req.formData()
   const raw = String(form.get('record_limit') ?? '').trim()
   let limit: number | null = null
@@ -771,7 +780,7 @@ app.post('/admin/users/create', async (c) => {
   const name = String(form.get('name') ?? '').trim()
   const email = String(form.get('email') ?? '').trim()
   const password = String(form.get('password') ?? '')
-  const role = String(form.get('role') ?? 'user') === 'admin' ? 'admin' : 'user'
+  const role = isSuperAdminUser(admin) && String(form.get('role') ?? 'user') === 'admin' ? 'admin' : 'user'
 
   if (!name || !email || password.length < 8) {
     return c.redirect('/admin?create_error=' + encodeURIComponent('参数不完整或密码少于8位'))

@@ -7,8 +7,9 @@ export const AdminView: FC<{
   records: DnsRecordRow[]
   settings: Settings
   currentUserId: string
+  currentUserSuperAdmin: boolean
   createError?: string
-}> = ({ users, records, settings, currentUserId, createError }) => {
+}> = ({ users, records, settings, currentUserId, currentUserSuperAdmin, createError }) => {
   return (
     <div class="min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black pb-16">
       {/* Navigation Header */}
@@ -260,7 +261,7 @@ export const AdminView: FC<{
               </div>
               <div class="md:col-span-1">
                 <label class="block text-xs font-semibold text-slate-500 mb-1">角色</label>
-                <select name="role" class="w-full px-2 py-2 bg-slate-900/60 border border-slate-800 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500">
+                <select name="role" disabled={!currentUserSuperAdmin} class="w-full px-2 py-2 bg-slate-900/60 border border-slate-800 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed">
                   <option value="user" selected>用户</option>
                   <option value="admin">管理员</option>
                 </select>
@@ -287,9 +288,7 @@ export const AdminView: FC<{
               <tbody class="divide-y divide-slate-800/60">
                 {users.map((u) => {
                   const isSuper = !!u.super_admin
-                  const limit = u.record_limit === null || u.record_limit === undefined
-                    ? `全局 (${settings.max_records_per_user})`
-                    : String(u.record_limit)
+                  const hasUnlimitedRecords = isSuper || u.role === 'admin'
                   return (
                   <tr class="hover:bg-slate-900/40 transition">
                     <td class="py-4 px-4 text-white font-medium">
@@ -309,7 +308,7 @@ export const AdminView: FC<{
                       )}
                     </td>
                     <td class="py-4 px-4 font-mono-custom text-slate-300 text-xs">
-                      {isSuper ? (
+                      {hasUnlimitedRecords ? (
                         <span class="text-amber-400">∞</span>
                       ) : (
                         <form method="post" action={`/admin/users/${u.id}/limit`} class="flex items-center gap-1">
@@ -334,9 +333,9 @@ export const AdminView: FC<{
                     </td>
                     <td class="py-4 px-4 text-slate-400 text-xs">{new Date(u.createdAt).toLocaleString('zh-CN')}</td>
                     <td class="py-4 px-4 text-right">
-                      {u.id !== currentUserId && !isSuper && (
+                      {u.id !== currentUserId && !isSuper && (currentUserSuperAdmin || u.role !== 'admin') && (
                         <div class="flex justify-end gap-2">
-                          {u.role !== 'admin' ? (
+                          {currentUserSuperAdmin && (u.role !== 'admin' ? (
                             <form method="post" action={`/admin/users/${u.id}/role`} class="inline">
                               <input type="hidden" name="role" value="admin" />
                               <button type="submit" class="px-2.5 py-1 text-xs bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-900/30 rounded-lg transition active:scale-[0.98]">
@@ -350,7 +349,7 @@ export const AdminView: FC<{
                                 降为普通用户
                               </button>
                             </form>
-                          )}
+                          ))}
                           <form method="post" action={`/admin/users/${u.id}/delete`} class="inline" onsubmit="return confirm('确认删除该用户？将级联删除其所有 DNS 记录和关联会话！');">
                             <button type="submit" class="px-2.5 py-1 text-xs bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 border border-rose-900/30 rounded-lg transition active:scale-[0.98]">
                               删除用户

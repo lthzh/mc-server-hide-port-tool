@@ -167,6 +167,32 @@ export function resolveRecordLimit(
   return Math.max(0, Math.floor(userLimit))
 }
 
+type DnsLimitUser = {
+  role?: string | null
+  super_admin?: number | null
+  record_limit?: number | null
+}
+
+export function hasUnlimitedDnsLimits(user: DnsLimitUser | null | undefined): boolean {
+  return user?.role === 'admin' || Number(user?.super_admin ?? 0) > 0
+}
+
+export function resolveUserRecordLimit(
+  user: DnsLimitUser | null | undefined,
+  globalLimit: number
+): number {
+  if (hasUnlimitedDnsLimits(user)) return 0
+  return resolveRecordLimit(user?.record_limit ?? null, globalLimit)
+}
+
+export function resolveMinSubdomainLength(
+  user: DnsLimitUser | null | undefined,
+  globalMinLength: number
+): number {
+  if (hasUnlimitedDnsLimits(user)) return 0
+  return Math.max(0, Math.floor(globalMinLength))
+}
+
 export async function deleteUserCascade(db: D1Database, id: string): Promise<void> {
   await db.prepare('DELETE FROM dns_record WHERE user_id = ?').bind(id).run()
   await db.prepare('DELETE FROM session WHERE userId = ?').bind(id).run()
