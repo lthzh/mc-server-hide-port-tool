@@ -56,9 +56,12 @@ jobs:
             [ -n "${BETTER_AUTH_SECRET:-}" ] && echo "BETTER_AUTH_SECRET"
             [ -n "${GITHUB_CLIENT_ID:-}" ] && echo "GITHUB_CLIENT_ID"
             [ -n "${GITHUB_CLIENT_SECRET:-}" ] && echo "GITHUB_CLIENT_SECRET"
-            echo "$secret_names"
             echo "LIST_EOF"
           } >> "$GITHUB_OUTPUT"
+          # 根域名 token 不走 wrangler-action 的 secrets 字段（其名可能以数字开头，
+          # 不能直接作 env 名），而由 postCommands 中的 wrangler secret put 显式注入。
+          # secret_names 仅用于日志展示。
+          echo "domain_secret_names=$secret_names" >> "$GITHUB_OUTPUT"
           echo "domain_tokens_json=/tmp/domain_tokens.json" >> "$GITHUB_OUTPUT"
 
       - name: Deploy Worker (vars + secrets + migrations)
