@@ -42,6 +42,7 @@ import {
   listOAuthProviders,
   listPublicOAuthProviders,
   setOAuthProviderEnabled,
+  OAUTH_TEMPLATES,
   updateOAuthProvider,
   type OAuthProviderPublic,
   type OAuthProviderRow
@@ -59,8 +60,6 @@ import { getGitHubUser, meetsAgeRequirement } from './services/github'
 type Bindings = CloudflareBindings & {
   BETTER_AUTH_SECRET?: string
   BETTER_AUTH_URL?: string
-  GITHUB_CLIENT_ID?: string
-  GITHUB_CLIENT_SECRET?: string
 }
 
 type CloudflareError = {
@@ -537,7 +536,7 @@ app.post('/register', async (c) => {
       { status: 403 }
     )
   }
-  if (settings.registration_mode === 'github') {
+  if (settings.registration_mode === 'oauth') {
     return c.html(
       <Layout title="注册"><RegisterView settings={settings} error="仅支持 GitHub 注册" /></Layout>,
       { status: 403 }
@@ -702,99 +701,6 @@ app.post('/verify-email', async (c) => {
   }
 })
 
-// ---------- GitHub OAuth ----------
-app.post('/register/github', async (c) => {
-  const user = await getCurrentUser(c.env, c.req.raw.headers)
-  if (user) return c.redirect('/')
-  const settings = await getSettings(c.env.DB)
-  if (!settings.registration_enabled) {
-    return c.redirect('/register')
-  }
-  if (settings.registration_mode !== 'github' && settings.registration_mode !== 'both') {
-    return c.redirect('/register')
-  }
-  if (!c.env.GITHUB_CLIENT_ID || !c.env.GITHUB_CLIENT_SECRET) {
-    return c.html(
-      <Layout title="注册"><RegisterView settings={settings} error="GitHub OAuth 未配置" /></Layout>,
-      { status: 500 }
-    )
-  }
-  const form = await c.req.formData()
-  const inviteCode = String(form.get('invite_code') ?? '').trim()
-  const inviteCheck = await requireInviteCodeIfNeeded(c.env.DB, settings, inviteCode)
-  if (!inviteCheck.ok) {
-    return c.html(
-      <Layout title="注册"><RegisterView settings={settings} error={inviteCheck.message} /></Layout>,
-      { status: 400 }
-    )
-  }
-  const auth = await createAuth(c.env)
-  const res = await auth.api.signInSocial({
-    body: {
-      provider: 'github',
-      callbackURL: '/api/auth/callback/github?next=/register/github/done'
-    },
-    headers: c.req.raw.headers,
-    asResponse: true
-  })
-  if (inviteCheck.code) {
-    const headers = new Headers(res.headers)
-    headers.append(
-      'Set-Cookie',
-      `pending_invite_code=${encodeURIComponent(inviteCheck.code)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=1800`
-    )
-    return new Response(res.body, { status: res.status, headers })
-  }
-  return res
-})
-
-app.get('/register/github/done', async (c) => {
-  const user = await getCurrentUser(c.env, c.req.raw.headers)
-  const settings = await getSettings(c.env.DB)
-  const cookieHeader = c.req.header('Cookie') || ''
-  const pendingInvite = parseCookie(cookieHeader, 'pending_invite_code')
-  const clearInviteCookie = 'pending_invite_code=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0'
-  if (!user) {
-    return redirectWithHeaders('/login', 302, new Headers({ 'Set-Cookie': clearInviteCookie }))
-  }
-// 读取 GitHub account 的 accessToken 做账号年龄校验
-  const account = await c.env.DB
-    .prepare("SELECT accessToken FROM account WHERE userId = ? AND providerId = 'github' ORDER BY updatedAt DESC LIMIT 1")
-    .bind(user.id)
-    .first<{ accessToken: string | null }>()
-
-  const failInvite = async (message: string, status: 400 | 403 = 400) => {
-    await deleteUserCascade(c.env.DB, user.id)
-    return c.html(
-      <Layout title="注册"><RegisterView settings={settings} error={message} /></Layout>,
-      { status, headers: { 'Set-Cookie': clearInviteCookie } }
-    )
-  }
-
-  if (account?.accessToken) {
-    const ghUser = await getGitHubUser(account.accessToken)
-    if (ghUser && !meetsAgeRequirement(ghUser.created_at, settings.github_min_account_age_days)) {
-      return await failInvite(
-        `该 GitHub 账号注册天数不足，至少需要 ${settings.github_min_account_age_days} 天`,
-        403
-      )
-    }
-  }
-
-// GitHub 登录后对新用户消耗邀请码
-  const createdAtMs = new Date(user.createdAt).getTime()
-  const isNewUser = Number.isFinite(createdAtMs) && Date.now() - createdAtMs < 5 * 60 * 1000
-  if (settings.invite_required && isNewUser) {
-    const used = await finalizeInviteUsage(c.env.DB, pendingInvite, user.id)
-    if (!used.ok) {
-      return await failInvite(used.message)
-    }
-  }
-  return redirectWithHeaders('/', 302, new Headers({ 'Set-Cookie': clearInviteCookie }))
-})
-
-
-// ---------- 退出 ----------
 app.on(['GET', 'POST'], '/logout', async (c) => {
   const auth = await createAuth(c.env)
   try {
@@ -838,6 +744,7 @@ app.get('/admin', async (c) => {
         settings={settings}
         inviteCodes={inviteCodes}
         oauthProviders={oauthProviders}
+        oauthTemplates={OAUTH_TEMPLATES}
         currentUserId={user.id}
         currentUserSuperAdmin={isSuperAdminUser(user)}
         createError={c.req.query('create_error') ?? undefined}
@@ -857,8 +764,8 @@ app.post('/admin/settings', async (c) => {
   const current = await getSettings(c.env.DB)
 
   const mode = String(form.get('registration_mode') ?? 'email')
-  const modeNorm: 'email' | 'github' | 'both' =
-    mode === 'github' || mode === 'both' ? mode : 'email'
+  const modeNorm: 'email' | 'oauth' | 'both' =
+    mode === 'oauth' || mode === 'github' ? 'oauth' : mode === 'both' ? 'both' : 'email'
 
   const whitelistSuffixesRaw = String(form.get('email_whitelist_suffixes') ?? '').trim()
   const blacklistSuffixesRaw = String(form.get('email_blacklist_suffixes') ?? '').trim()
@@ -1065,6 +972,12 @@ app.post('/register/oauth', async (c) => {
   if (!settings.registration_enabled) {
     return c.redirect('/register')
   }
+  if (settings.registration_mode === 'email') {
+    return c.html(
+      <Layout title="注册"><RegisterView settings={settings} oauthProviders={await listPublicOAuthProviders(c.env.DB)} error="?????????" /></Layout>,
+      { status: 403 }
+    )
+  }
   const form = await c.req.formData()
   const providerId = String(form.get('provider_id') ?? '').trim()
   const inviteCode = String(form.get('invite_code') ?? '').trim()
@@ -1123,22 +1036,47 @@ app.get('/register/oauth/done', async (c) => {
   if (!user) {
     return redirectWithHeaders('/login', 302, new Headers({ 'Set-Cookie': clearInviteCookie }))
   }
+
+  const failOAuthRegister = async (message: string, status: 400 | 403 = 400) => {
+    await deleteUserCascade(c.env.DB, user.id)
+    return c.html(
+      <Layout title="注册">
+        <RegisterView
+          settings={settings}
+          oauthProviders={await listPublicOAuthProviders(c.env.DB)}
+          error={message}
+        />
+      </Layout>,
+      { status, headers: { 'Set-Cookie': clearInviteCookie } }
+    )
+  }
+
   const createdAtMs = new Date(user.createdAt).getTime()
   const isNewUser = Number.isFinite(createdAtMs) && Date.now() - createdAtMs < 5 * 60 * 1000
+
+  // Keep GitHub account-age restriction after merging GitHub into generic OAuth
+  if (isNewUser && settings.github_min_account_age_days > 0) {
+    const account = await c.env.DB
+      .prepare(
+        "SELECT accessToken FROM account WHERE userId = ? AND providerId = 'github' ORDER BY updatedAt DESC LIMIT 1"
+      )
+      .bind(user.id)
+      .first<{ accessToken: string | null }>()
+    if (account?.accessToken) {
+      const ghUser = await getGitHubUser(account.accessToken)
+      if (ghUser && !meetsAgeRequirement(ghUser.created_at, settings.github_min_account_age_days)) {
+        return await failOAuthRegister(
+          `GitHub 账号注册天数不足 ${settings.github_min_account_age_days} 天`,
+          403
+        )
+      }
+    }
+  }
+
   if (settings.invite_required && isNewUser) {
     const used = await finalizeInviteUsage(c.env.DB, pendingInvite, user.id)
     if (!used.ok) {
-      await deleteUserCascade(c.env.DB, user.id)
-      return c.html(
-        <Layout title="注册">
-          <RegisterView
-            settings={settings}
-            oauthProviders={await listPublicOAuthProviders(c.env.DB)}
-            error={used.message}
-          />
-        </Layout>,
-        { status: 400, headers: { 'Set-Cookie': clearInviteCookie } }
-      )
+      return await failOAuthRegister(used.message)
     }
   }
   return redirectWithHeaders('/', 302, new Headers({ 'Set-Cookie': clearInviteCookie }))
@@ -1161,7 +1099,8 @@ app.post('/admin/oauth/create', async (c) => {
     scopes: String(form.get('scopes') ?? 'openid,profile,email'),
     pkce: form.get('pkce') === 'on',
     enabled: form.get('enabled') === 'on',
-    sort_order: Number(form.get('sort_order') ?? 0)
+    sort_order: Number(form.get('sort_order') ?? 0),
+    icon_url: String(form.get('icon_url') ?? '')
   })
   if (!result.ok) {
     return c.redirect('/admin?oauth_error=' + encodeURIComponent(result.message))
@@ -1186,7 +1125,8 @@ app.post('/admin/oauth/:id/update', async (c) => {
     scopes: String(form.get('scopes') ?? 'openid,profile,email'),
     pkce: form.get('pkce') === 'on',
     enabled: form.get('enabled') === 'on',
-    sort_order: Number(form.get('sort_order') ?? 0)
+    sort_order: Number(form.get('sort_order') ?? 0),
+    icon_url: String(form.get('icon_url') ?? '')
   })
   if (!result.ok) {
     return c.redirect('/admin?oauth_error=' + encodeURIComponent(result.message))

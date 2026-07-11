@@ -63,7 +63,7 @@ export const LoginView: FC<{
               required
               autocomplete="current-password"
               class="w-full px-4 py-3 bg-slate-950/60 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
-              placeholder="••••••••"
+              placeholder="********"
             />
           </div>
 
@@ -74,7 +74,6 @@ export const LoginView: FC<{
             登录
           </button>
         </form>
-
 
         {oauthProviders.length > 0 && (
           <div class="mt-6 space-y-3">
@@ -89,9 +88,12 @@ export const LoginView: FC<{
                 <input type="hidden" name="provider_id" value={p.provider_id} />
                 <button
                   type="submit"
-                  class="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition duration-200 border border-slate-700 shadow-md active:scale-[0.98]"
+                  class="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition duration-200 border border-slate-700 shadow-md active:scale-[0.98] flex items-center justify-center gap-3"
                 >
-                  使用 {p.name} 登录
+                  {p.icon_url ? (
+                    <img src={p.icon_url} alt="" class="w-5 h-5 object-contain bg-white/90 rounded-sm p-0.5" />
+                  ) : null}
+                  <span>使用 {p.name} 登录</span>
                 </button>
               </form>
             ))}

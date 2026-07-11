@@ -1,4 +1,4 @@
-﻿import { betterAuth } from 'better-auth'
+import { betterAuth } from 'better-auth'
 import { genericOAuth } from 'better-auth/plugins'
 import {
   listEnabledOAuthProviders,
@@ -11,8 +11,6 @@ export type AuthBindings = {
   BETTER_AUTH_SECRET?: string
   APP_NAME?: string
   BETTER_AUTH_URL?: string
-  GITHUB_CLIENT_ID?: string
-  GITHUB_CLIENT_SECRET?: string
 }
 
 export type Auth = ReturnType<typeof betterAuth>
@@ -21,7 +19,6 @@ export async function createAuth(
   env: AuthBindings,
   oauthProviders?: OAuthProviderRow[]
 ) {
-  const githubConfigured = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET)
   const providers =
     oauthProviders ?? (await listEnabledOAuthProviders(env.DB).catch(() => [] as OAuthProviderRow[]))
 
@@ -59,15 +56,6 @@ export async function createAuth(
         }
       }
     },
-    socialProviders: githubConfigured
-      ? {
-          github: {
-            clientId: env.GITHUB_CLIENT_ID!,
-            clientSecret: env.GITHUB_CLIENT_SECRET!,
-            scope: ['user:email']
-          }
-        }
-      : undefined,
     plugins:
       genericConfigs.length > 0
         ? [

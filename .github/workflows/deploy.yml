@@ -40,8 +40,6 @@ jobs:
           DOMAINS_HINT: ${{ secrets.DOMAINS }}
           BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-          GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
-          GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           # 解析 CLOUDFLARE_DOMAINS_API_TOKEN：line1 名单、line2 JSON 值、line3 域名数组
@@ -61,8 +59,6 @@ jobs:
           {
             echo "secrets<<LIST_EOF"
             [ -n "${BETTER_AUTH_SECRET:-}" ] && echo "BETTER_AUTH_SECRET"
-            [ -n "${GITHUB_CLIENT_ID:-}" ] && echo "GITHUB_CLIENT_ID"
-            [ -n "${GITHUB_CLIENT_SECRET:-}" ] && echo "GITHUB_CLIENT_SECRET"
             echo "LIST_EOF"
           } >> "$GITHUB_OUTPUT"
           # 根域名 token 不走 wrangler-action 的 secrets 字段（其名可能以数字开头，
@@ -80,8 +76,6 @@ jobs:
           DOMAINS: ${{ steps.lists.outputs.domains }}
           BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-          GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
-          GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
           DOMAIN_TOKENS_JSON: ${{ steps.lists.outputs.domain_tokens_json }}
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

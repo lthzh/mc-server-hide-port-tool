@@ -1,6 +1,6 @@
-﻿export type Settings = {
+export type Settings = {
   registration_enabled: boolean
-  registration_mode: 'email' | 'github' | 'both'
+  registration_mode: 'email' | 'oauth' | 'both'
   invite_required: boolean
   email_whitelist_enabled: boolean
   email_whitelist_suffixes: string[]
@@ -142,8 +142,10 @@ export async function updateSettings(
   return next
 }
 
-function normalizeMode(m: string): 'email' | 'github' | 'both' {
-  if (m === 'email' || m === 'github' || m === 'both') return m
+function normalizeMode(m: string): 'email' | 'oauth' | 'both' {
+  // legacy github mode -> oauth
+  if (m === 'github' || m === 'oauth') return 'oauth'
+  if (m === 'both') return 'both'
   return 'email'
 }
 

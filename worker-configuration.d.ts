@@ -9,8 +9,6 @@ interface __BaseEnv_CloudflareBindings {
 	DOMAINS: string;
 	BETTER_AUTH_SECRET: string;
 	BETTER_AUTH_URL: string;
-	GITHUB_CLIENT_ID: string;
-	GITHUB_CLIENT_SECRET: string;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
@@ -23,7 +21,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "APP_NAME" | "303302_xyz_CLOUDFLARE_API_TOKEN" | "DOMAINS" | "BETTER_AUTH_SECRET" | "BETTER_AUTH_URL" | "GITHUB_CLIENT_ID" | "GITHUB_CLIENT_SECRET">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "APP_NAME" | "303302_xyz_CLOUDFLARE_API_TOKEN" | "DOMAINS" | "BETTER_AUTH_SECRET" | "BETTER_AUTH_URL">> {}
 }
 
 // Begin runtime types

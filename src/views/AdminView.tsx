@@ -1,7 +1,7 @@
 import type { FC } from 'hono/jsx'
 import type { DnsRecordRow, UserListRow } from '../services/dns-records'
 import type { InviteCodeRow } from '../services/invite-codes'
-import type { OAuthProviderRow } from '../services/oauth-providers'
+import type { OAuthProviderRow, OAuthTemplate } from '../services/oauth-providers'
 import type { Settings } from '../services/settings'
 
 export const AdminView: FC<{
@@ -10,6 +10,7 @@ export const AdminView: FC<{
   settings: Settings
   inviteCodes: InviteCodeRow[]
   oauthProviders: OAuthProviderRow[]
+  oauthTemplates?: OAuthTemplate[]
   currentUserId: string
   currentUserSuperAdmin: boolean
   createError?: string
@@ -17,7 +18,7 @@ export const AdminView: FC<{
   inviteInfo?: string
   oauthError?: string
   oauthInfo?: string
-}> = ({ users, records, settings, inviteCodes, oauthProviders, currentUserId, currentUserSuperAdmin, createError, inviteError, inviteInfo, oauthError, oauthInfo }) => {
+}> = ({ users, records, settings, inviteCodes, oauthProviders, oauthTemplates = [], currentUserId, currentUserSuperAdmin, createError, inviteError, inviteInfo, oauthError, oauthInfo }) => {
   return (
     <div class="min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black pb-16">
       {/* Navigation Header */}
@@ -79,8 +80,8 @@ export const AdminView: FC<{
                     class="w-full px-4 py-3 bg-slate-950/60 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition cursor-pointer"
                   >
                     <option value="email" selected={settings.registration_mode === 'email'}>仅邮箱模式</option>
-                    <option value="github" selected={settings.registration_mode === 'github'}>仅 GitHub 授权模式</option>
-                    <option value="both" selected={settings.registration_mode === 'both'}>邮箱 + GitHub 双模式</option>
+                    <option value="oauth" selected={settings.registration_mode === 'oauth'}>仅 OAuth 授权模式</option>
+                    <option value="both" selected={settings.registration_mode === 'both'}>邮箱 + OAuth 双模式</option>
                   </select>
                 </div>
 
@@ -96,7 +97,7 @@ export const AdminView: FC<{
                 </div>
 
                 <div>
-                  <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">GitHub 账号最短注册天数限制</label>
+                  <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">GitHub 账号最短注册天数限制（仅 provider_id=github）</label>
                   <input
                     type="number"
                     name="github_min_account_age_days"
@@ -262,14 +263,54 @@ export const AdminView: FC<{
 
           <div class="mb-8 p-5 bg-slate-950/40 rounded-xl border border-slate-800/80">
             <h4 class="text-sm font-bold text-white mb-4">添加 OAuth 应用</h4>
+            {oauthTemplates.length > 0 && (
+              <div class="mb-4 space-y-2">
+                <label class="block text-xs font-semibold text-slate-500">常用模板（选择后自动填充表单）</label>
+                <select
+                  class="w-full md:w-80 px-3 py-2 bg-slate-900/60 border border-slate-800 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500"
+                  onchange={`
+                    try {
+                      const raw = this.options[this.selectedIndex].dataset.template || '';
+                      if (!raw) return;
+                      const t = JSON.parse(decodeURIComponent(raw));
+                      const form = this.closest('div.mb-8').querySelector('form');
+                      if (!form) return;
+                      const set = (name, val) => {
+                        const el = form.querySelector('[name="' + name + '"]');
+                        if (!el) return;
+                        if (el.type === 'checkbox') el.checked = !!val;
+                        else el.value = val == null ? '' : String(val);
+                      };
+                      set('provider_id', t.provider_id || '');
+                      set('name', t.name || '');
+                      set('discovery_url', t.discovery_url || '');
+                      set('authorization_url', t.authorization_url || '');
+                      set('token_url', t.token_url || '');
+                      set('user_info_url', t.user_info_url || '');
+                      set('scopes', t.scopes || 'openid,profile,email');
+                      set('pkce', !!t.pkce);
+                      set('icon_url', t.icon_url || '');
+                    } catch (e) {}
+                  `}
+                >
+                  <option value="">自定义 / 不使用模板</option>
+                  {oauthTemplates.map((t) => (
+                    <option value={t.id} data-template={encodeURIComponent(JSON.stringify(t))}>
+                      {t.name} ({t.provider_id})
+                    </option>
+                  ))}
+                </select>
+                <p class="text-[11px] text-slate-500">GitHub 模板会写入 provider_id=github，并保留账号天数限制逻辑。</p>
+              </div>
+            )}
             <form method="post" action="/admin/oauth/create" class="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label class="block text-xs font-semibold text-slate-500 mb-1">Provider ID</label>
-                <input name="provider_id" required placeholder="oidc-corp" class="w-full px-3 py-2 bg-slate-900/60 border border-slate-800 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500 font-mono-custom" />
+                <input name="provider_id" required placeholder="github / linuxdo / oidc-corp" class="w-full px-3 py-2 bg-slate-900/60 border border-slate-800 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500 font-mono-custom" />
               </div>
               <div>
                 <label class="block text-xs font-semibold text-slate-500 mb-1">显示名称</label>
-                <input name="name" required placeholder="Corp SSO" class="w-full px-3 py-2 bg-slate-900/60 border border-slate-800 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500" />
+                <input name="name" required placeholder="GitHub / Linux.do" class="w-full px-3 py-2 bg-slate-900/60 border border-slate-800 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500" />
               </div>
               <div>
                 <label class="block text-xs font-semibold text-slate-500 mb-1">Client ID</label>
@@ -300,6 +341,10 @@ export const AdminView: FC<{
                 <input name="scopes" value="openid,profile,email" class="w-full px-3 py-2 bg-slate-900/60 border border-slate-800 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500 font-mono-custom" />
               </div>
               <div>
+                <label class="block text-xs font-semibold text-slate-500 mb-1">图标 URL</label>
+                <input name="icon_url" placeholder="https://.../icon.svg" class="w-full px-3 py-2 bg-slate-900/60 border border-slate-800 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500 font-mono-custom" />
+              </div>
+              <div>
                 <label class="block text-xs font-semibold text-slate-500 mb-1">Sort</label>
                 <input name="sort_order" type="number" value="0" class="w-full px-3 py-2 bg-slate-900/60 border border-slate-800 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500 font-mono-custom" />
               </div>
@@ -315,7 +360,7 @@ export const AdminView: FC<{
                 <button type="submit" class="ml-auto px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-lg transition">添加 OAuth</button>
               </div>
             </form>
-            <p class="mt-3 text-xs text-slate-500">回调地址格式：BETTER_AUTH_URL/api/auth/oauth2/callback/&lt;provider_id&gt;</p>
+            <p class="mt-3 text-xs text-slate-500">回调地址格式：BETTER_AUTH_URL/api/auth/oauth2/callback/&lt;provider_id&gt;。GitHub 请使用 provider_id=<code class="text-emerald-400">github</code>，回调为 .../oauth2/callback/github。</p>
           </div>
 
           <div class="overflow-x-auto">
@@ -338,7 +383,12 @@ export const AdminView: FC<{
                   oauthProviders.map((p) => (
                     <tr class="hover:bg-slate-900/40 transition align-top">
                       <td class="py-4 px-4 font-mono-custom text-emerald-400 text-xs">{p.provider_id}</td>
-                      <td class="py-4 px-4 text-white">{p.name}</td>
+                      <td class="py-4 px-4 text-white">
+                        <div class="flex items-center gap-2">
+                          {p.icon_url ? <img src={p.icon_url} alt="" class="w-4 h-4 object-contain bg-white/90 rounded-sm p-0.5" /> : null}
+                          <span>{p.name}</span>
+                        </div>
+                      </td>
                       <td class="py-4 px-4">
                         <span class={`px-2 py-0.5 rounded text-xs font-semibold border ${p.enabled ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-800 text-slate-400 border-slate-700'}`}>
                           {p.enabled ? '启用' : '禁用'}
@@ -370,6 +420,7 @@ export const AdminView: FC<{
                             <input name="token_url" value={p.token_url ?? ''} class="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded text-xs text-white font-mono-custom" placeholder="token_url" />
                             <input name="user_info_url" value={p.user_info_url ?? ''} class="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded text-xs text-white font-mono-custom" placeholder="user_info_url" />
                             <input name="scopes" value={p.scopes} class="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded text-xs text-white font-mono-custom" />
+                            <input name="icon_url" value={p.icon_url ?? ''} class="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded text-xs text-white font-mono-custom" placeholder="icon_url" />
                             <input name="sort_order" type="number" value={p.sort_order} class="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded text-xs text-white font-mono-custom" />
                             <label class="inline-flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" name="pkce" checked={!!p.pkce} /> PKCE</label>
                             <label class="inline-flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" name="enabled" checked={!!p.enabled} /> 启用</label>

@@ -1,4 +1,4 @@
-﻿export type OAuthProviderRow = {
+export type OAuthProviderRow = {
   id: string
   provider_id: string
   name: string
@@ -12,15 +12,16 @@
   pkce: number
   enabled: number
   sort_order: number
+  icon_url: string | null
   created_at: number
   updated_at: number
 }
 
 export type OAuthProviderPublic = {
-  id: string
   provider_id: string
   name: string
-  enabled: boolean
+  icon_url: string | null
+  sort_order: number
 }
 
 export type OAuthProviderInput = {
@@ -28,68 +29,178 @@ export type OAuthProviderInput = {
   name: string
   client_id: string
   client_secret: string
-  discovery_url?: string | null
-  authorization_url?: string | null
-  token_url?: string | null
-  user_info_url?: string | null
+  discovery_url?: string
+  authorization_url?: string
+  token_url?: string
+  user_info_url?: string
   scopes?: string
   pkce?: boolean
   enabled?: boolean
   sort_order?: number
+  icon_url?: string
 }
 
-function normalizeProviderId(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64)
+export type OAuthTemplate = {
+  id: string
+  name: string
+  provider_id: string
+  discovery_url?: string
+  authorization_url?: string
+  token_url?: string
+  user_info_url?: string
+  scopes: string
+  pkce: boolean
+  icon_url?: string
+  notes?: string
 }
 
-function normalizeOptionalUrl(raw: string | null | undefined): string | null {
-  const v = (raw ?? '').trim()
-  return v ? v : null
+const RESERVED_PROVIDER_IDS = new Set(['credential'])
+
+export const OAUTH_TEMPLATES: OAuthTemplate[] = [
+  {
+    id: 'github',
+    name: 'GitHub',
+    provider_id: 'github',
+    authorization_url: 'https://github.com/login/oauth/authorize',
+    token_url: 'https://github.com/login/oauth/access_token',
+    user_info_url: 'https://api.github.com/user',
+    scopes: 'read:user,user:email',
+    pkce: false,
+    icon_url: 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/github.svg',
+    notes: 'Callback: BETTER_AUTH_URL/api/auth/oauth2/callback/github'
+  },
+  {
+    id: 'google',
+    name: 'Google',
+    provider_id: 'google',
+    discovery_url: 'https://accounts.google.com/.well-known/openid-configuration',
+    scopes: 'openid,profile,email',
+    pkce: true,
+    icon_url: 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/google.svg'
+  },
+  {
+    id: 'microsoft',
+    name: 'Microsoft Entra ID',
+    provider_id: 'microsoft',
+    discovery_url:
+      'https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration',
+    scopes: 'openid,profile,email,offline_access',
+    pkce: true,
+    icon_url: 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/microsoft.svg'
+  },
+  {
+    id: 'discord',
+    name: 'Discord',
+    provider_id: 'discord',
+    authorization_url: 'https://discord.com/api/oauth2/authorize',
+    token_url: 'https://discord.com/api/oauth2/token',
+    user_info_url: 'https://discord.com/api/users/@me',
+    scopes: 'identify,email',
+    pkce: true,
+    icon_url: 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/discord.svg'
+  },
+  {
+    id: 'linuxdo',
+    name: 'Linux.do',
+    provider_id: 'linuxdo',
+    authorization_url: 'https://connect.linux.do/oauth2/authorize',
+    token_url: 'https://connect.linux.do/oauth2/token',
+    user_info_url: 'https://connect.linux.do/api/user',
+    scopes: 'openid,profile,email',
+    pkce: true
+  },
+  {
+    id: 'oidc',
+    name: 'Generic OIDC',
+    provider_id: 'oidc',
+    discovery_url: '',
+    scopes: 'openid,profile,email',
+    pkce: true,
+    notes: 'Fill discovery_url or authorization/token/userinfo URLs'
+  }
+]
+
+export function getOAuthTemplate(id: string): OAuthTemplate | null {
+  return OAUTH_TEMPLATES.find((t) => t.id === id) ?? null
 }
 
-export function parseScopes(scopes: string | null | undefined): string[] {
+function parseScopes(scopes: string | null | undefined): string[] {
   return String(scopes ?? '')
     .split(/[,\s]+/)
     .map((s) => s.trim())
     .filter(Boolean)
 }
 
+function normalizeOptionalUrl(raw: string | undefined | null): string | null {
+  const v = String(raw ?? '').trim()
+  return v ? v : null
+}
+
+function normalizeIconUrl(raw: string | undefined | null): string | null {
+  const v = String(raw ?? '').trim()
+  if (!v) return null
+  if (!/^https?:\/\//i.test(v)) return null
+  return v
+}
+
 export function validateOAuthProviderInput(
   input: OAuthProviderInput,
   opts?: { requireSecret?: boolean }
-): { ok: true; value: Required<Pick<OAuthProviderInput, 'provider_id' | 'name' | 'client_id' | 'client_secret' | 'scopes' | 'pkce' | 'enabled' | 'sort_order'>> & {
-  discovery_url: string | null
-  authorization_url: string | null
-  token_url: string | null
-  user_info_url: string | null
-} } | { ok: false; message: string } {
-  const provider_id = normalizeProviderId(input.provider_id)
-  const name = input.name.trim()
-  const client_id = input.client_id.trim()
-  const client_secret = input.client_secret.trim()
+):
+  | {
+      ok: true
+      value: {
+        provider_id: string
+        name: string
+        client_id: string
+        client_secret: string
+        discovery_url: string | null
+        authorization_url: string | null
+        token_url: string | null
+        user_info_url: string | null
+        scopes: string
+        pkce: boolean
+        enabled: boolean
+        sort_order: number
+        icon_url: string | null
+      }
+    }
+  | { ok: false; message: string } {
+  const provider_id = String(input.provider_id ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
+  const name = String(input.name ?? '').trim()
+  const client_id = String(input.client_id ?? '').trim()
+  const client_secret = String(input.client_secret ?? '').trim()
   const discovery_url = normalizeOptionalUrl(input.discovery_url)
   const authorization_url = normalizeOptionalUrl(input.authorization_url)
   const token_url = normalizeOptionalUrl(input.token_url)
   const user_info_url = normalizeOptionalUrl(input.user_info_url)
-  const scopes = (input.scopes ?? 'openid,profile,email').trim() || 'openid,profile,email'
+  const icon_url = normalizeIconUrl(input.icon_url)
+  const scopes = String(input.scopes ?? 'openid,profile,email').trim() || 'openid,profile,email'
   const pkce = input.pkce !== false
   const enabled = input.enabled !== false
-  const sort_order = Math.max(0, Math.floor(Number(input.sort_order ?? 0) || 0))
+  const sort_order = Number.isFinite(Number(input.sort_order)) ? Math.floor(Number(input.sort_order)) : 0
 
-  if (!provider_id) return { ok: false, message: 'provider_id 无效（仅支持字母数字、下划线、中划线）' }
-  if (provider_id === 'credential') return { ok: false, message: 'provider_id 不能为 credential' }
+  if (!provider_id) return { ok: false, message: '提供商 ID 无效（仅支持字母数字、下划线、中划线）' }
+  if (RESERVED_PROVIDER_IDS.has(provider_id)) {
+    return { ok: false, message: 'provider_id 不能为 credential' }
+  }
   if (!name) return { ok: false, message: '请填写显示名称' }
-  if (!client_id) return { ok: false, message: '请填写 Client ID' }
-  if ((opts?.requireSecret ?? true) && !client_secret) {
-    return { ok: false, message: '请填写 Client Secret' }
+  if (!client_id) return { ok: false, message: '请填写 client_id' }
+  if (opts?.requireSecret !== false && !client_secret) {
+    return { ok: false, message: '请填写 client_secret' }
+  }
+  if (input.icon_url && String(input.icon_url).trim() && !icon_url) {
+    return { ok: false, message: '图标 URL 需以 http:// 或 https:// 开头' }
   }
   if (!discovery_url && !(authorization_url && token_url)) {
-    return { ok: false, message: '请填写 Discovery URL，或同时填写 Authorization URL 与 Token URL' }
+    return {
+      ok: false,
+      message:
+        '请填写 Discovery URL，或同时填写 Authorization URL 与 Token URL'
+    }
   }
 
   return {
@@ -106,7 +217,8 @@ export function validateOAuthProviderInput(
       scopes,
       pkce,
       enabled,
-      sort_order
+      sort_order,
+      icon_url
     }
   }
 }
@@ -128,18 +240,15 @@ export async function listEnabledOAuthProviders(db: D1Database): Promise<OAuthPr
 export async function listPublicOAuthProviders(db: D1Database): Promise<OAuthProviderPublic[]> {
   const rows = await listEnabledOAuthProviders(db)
   return rows.map((r) => ({
-    id: r.id,
     provider_id: r.provider_id,
     name: r.name,
-    enabled: true
+    icon_url: r.icon_url ?? null,
+    sort_order: r.sort_order
   }))
 }
 
 export async function findOAuthProviderById(db: D1Database, id: string): Promise<OAuthProviderRow | null> {
-  return await db
-    .prepare('SELECT * FROM oauth_provider WHERE id = ?')
-    .bind(id)
-    .first<OAuthProviderRow>()
+  return await db.prepare('SELECT * FROM oauth_provider WHERE id = ?').bind(id).first<OAuthProviderRow>()
 }
 
 export async function findOAuthProviderByProviderId(
@@ -162,11 +271,6 @@ export async function createOAuthProvider(
   const existing = await findOAuthProviderByProviderId(db, validated.value.provider_id)
   if (existing) return { ok: false, message: 'provider_id 已存在' }
 
-  // 保留内置 github env 配置的命名空间，避免冲突
-  if (validated.value.provider_id === 'github') {
-    return { ok: false, message: 'github 为内置提供商，请改用其他 provider_id（如 github-enterprise）' }
-  }
-
   const now = Date.now()
   const id = crypto.randomUUID()
   const row: OAuthProviderRow = {
@@ -183,6 +287,7 @@ export async function createOAuthProvider(
     pkce: validated.value.pkce ? 1 : 0,
     enabled: validated.value.enabled ? 1 : 0,
     sort_order: validated.value.sort_order,
+    icon_url: validated.value.icon_url,
     created_at: now,
     updated_at: now
   }
@@ -190,8 +295,8 @@ export async function createOAuthProvider(
   await db
     .prepare(
       `INSERT INTO oauth_provider
-        (id, provider_id, name, client_id, client_secret, discovery_url, authorization_url, token_url, user_info_url, scopes, pkce, enabled, sort_order, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        (id, provider_id, name, client_id, client_secret, discovery_url, authorization_url, token_url, user_info_url, scopes, pkce, enabled, sort_order, icon_url, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       row.id,
@@ -207,6 +312,7 @@ export async function createOAuthProvider(
       row.pkce,
       row.enabled,
       row.sort_order,
+      row.icon_url,
       row.created_at,
       row.updated_at
     )
@@ -218,7 +324,7 @@ export async function createOAuthProvider(
 export async function updateOAuthProvider(
   db: D1Database,
   id: string,
-  input: OAuthProviderInput & { keep_secret?: boolean }
+  input: OAuthProviderInput
 ): Promise<{ ok: true; provider: OAuthProviderRow } | { ok: false; message: string }> {
   const current = await findOAuthProviderById(db, id)
   if (!current) return { ok: false, message: 'OAuth 应用不存在' }
@@ -229,10 +335,6 @@ export async function updateOAuthProvider(
     { requireSecret: true }
   )
   if (!validated.ok) return validated
-
-  if (validated.value.provider_id === 'github') {
-    return { ok: false, message: 'github 为内置提供商，请改用其他 provider_id' }
-  }
 
   const conflict = await findOAuthProviderByProviderId(db, validated.value.provider_id)
   if (conflict && conflict.id !== id) {
@@ -255,6 +357,7 @@ export async function updateOAuthProvider(
         pkce = ?,
         enabled = ?,
         sort_order = ?,
+        icon_url = ?,
         updated_at = ?
       WHERE id = ?`
     )
@@ -271,6 +374,7 @@ export async function updateOAuthProvider(
       validated.value.pkce ? 1 : 0,
       validated.value.enabled ? 1 : 0,
       validated.value.sort_order,
+      validated.value.icon_url,
       now,
       id
     )
@@ -297,7 +401,7 @@ export async function setOAuthProviderEnabled(
 }
 
 export function toGenericOAuthConfig(row: OAuthProviderRow) {
-  return {
+  const base = {
     providerId: row.provider_id,
     clientId: row.client_id,
     clientSecret: row.client_secret,
@@ -308,4 +412,58 @@ export function toGenericOAuthConfig(row: OAuthProviderRow) {
     scopes: parseScopes(row.scopes),
     pkce: !!row.pkce
   }
+
+  if (row.provider_id === 'github') {
+    return {
+      ...base,
+      async getUserInfo(tokens: { accessToken?: string | null }) {
+        const accessToken = tokens.accessToken
+        if (!accessToken) return null
+        const userRes = await fetch('https://api.github.com/user', {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: 'application/vnd.github+json',
+            'User-Agent': 'hide-port-tool'
+          }
+        })
+        if (!userRes.ok) return null
+        const profile = (await userRes.json()) as {
+          id?: number | string
+          login?: string
+          name?: string | null
+          email?: string | null
+          avatar_url?: string | null
+        }
+        let email = profile.email || null
+        if (!email) {
+          const emailsRes = await fetch('https://api.github.com/user/emails', {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              Accept: 'application/vnd.github+json',
+              'User-Agent': 'hide-port-tool'
+            }
+          })
+          if (emailsRes.ok) {
+            const emails = (await emailsRes.json()) as Array<{
+              email?: string
+              primary?: boolean
+              verified?: boolean
+            }>
+            const primary = emails.find((e) => e.primary && e.email) || emails.find((e) => e.email)
+            email = primary?.email ?? null
+          }
+        }
+        if (!profile.id || !email) return null
+        return {
+          id: String(profile.id),
+          name: profile.name || profile.login || email,
+          email,
+          image: profile.avatar_url || undefined,
+          emailVerified: true
+        }
+      }
+    }
+  }
+
+  return base
 }

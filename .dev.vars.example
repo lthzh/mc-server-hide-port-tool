@@ -7,5 +7,5 @@ example2_com_CLOUDFLARE_API_TOKEN=your_example2_com_api_token_here
 DOMAINS=["example1.com","example2.com","303302.xyz"]
 BETTER_AUTH_SECRET=replace_with_a_long_random_string
 BETTER_AUTH_URL=http://localhost:8787
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
+
+# OAuth（含 GitHub）在管理后台配置，写入 D1 oauth_provider；无需 GITHUB_CLIENT_* 环境变量。

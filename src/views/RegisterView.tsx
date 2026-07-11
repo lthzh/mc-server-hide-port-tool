@@ -11,10 +11,11 @@ export const RegisterView: FC<{
   oauthProviders?: OAuthProviderPublic[]
 }> = ({ settings, error, info, askCode, email, oauthProviders = [] }) => {
   const showEmail = settings.registration_mode === 'email' || settings.registration_mode === 'both'
-  const showGithub =
-    (settings.registration_mode === 'github' || settings.registration_mode === 'both') &&
+  const showOAuth =
+    (settings.registration_mode === 'oauth' || settings.registration_mode === 'both') &&
     settings.registration_enabled
   const needVerification = settings.resend_enabled && showEmail
+  const hasGitHubProvider = oauthProviders.some((p) => p.provider_id === 'github')
 
   return (
     <div class="min-h-screen flex items-center justify-center p-6 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black">
@@ -91,25 +92,9 @@ export const RegisterView: FC<{
                 minLength={8}
                 autocomplete="new-password"
                 class="w-full px-4 py-3 bg-slate-950/60 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
-                placeholder="••••••••"
+                placeholder="********"
               />
             </div>
-
-            {!needVerification && (
-              <div>
-                <label for="confirm" class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">确认密码</label>
-                <input
-                  type="password"
-                  id="confirm"
-                  name="confirm"
-                  required
-                  minLength={8}
-                  autocomplete="new-password"
-                  class="w-full px-4 py-3 bg-slate-950/60 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
-                  placeholder="••••••••"
-                />
-              </div>
-            )}
 
             {settings.invite_required && (
               <div>
@@ -127,7 +112,7 @@ export const RegisterView: FC<{
 
             {needVerification && (
               <p class="text-xs text-slate-400 bg-slate-950/40 p-3 rounded-lg border border-slate-800/80">
-                💡 填写后会发送验证码到你的邮箱，再进入下一步验证。
+                填写后会发送验证码到你的邮箱，再进入下一步验证。
               </p>
             )}
 
@@ -169,60 +154,21 @@ export const RegisterView: FC<{
           </form>
         )}
 
-        {settings.registration_enabled && showGithub && (
-          <div class="mt-6">
-            {showEmail && (
-              <div class="relative flex items-center justify-center my-6">
-                <div class="absolute inset-0 flex items-center">
-                  <div class="w-full border-t border-slate-800"></div>
-                </div>
-                <span class="relative px-3 bg-slate-900 text-xs text-slate-500 uppercase tracking-wider">或</span>
-              </div>
-            )}
-            <form method="post" action="/register/github">
-              {settings.invite_required && (
-                <div class="mb-3">
-                  <label for="github_invite_code" class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">邀请码</label>
-                  <input
-                    type="text"
-                    id="github_invite_code"
-                    name="invite_code"
-                    required
-                    class="w-full px-4 py-3 bg-slate-950/60 border border-slate-800 rounded-xl text-white font-mono-custom tracking-widest focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
-                    placeholder="XXXXX-XXXXX"
-                  />
-                </div>
-              )}
-
-              <button
-                type="submit"
-                class="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition duration-200 flex items-center justify-center gap-3 border border-slate-700 shadow-md active:scale-[0.98] focus:outline-none"
-              >
-                <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
-                </svg>
-                <span>使用 GitHub 注册 / 登录</span>
-              </button>
-              {settings.github_min_account_age_days > 0 && (
-                <p class="text-center text-xs text-slate-500 mt-3">
-                  ⚠️ 要求 GitHub 账号注册不少于 {settings.github_min_account_age_days} 天。
-                </p>
-              )}
-            </form>
-          </div>
-        )}
-
-        
-        {settings.registration_enabled && oauthProviders.length > 0 && (
+        {showOAuth && oauthProviders.length > 0 && (
           <div class="mt-6 space-y-3">
             <div class="relative flex items-center justify-center my-2">
               <div class="absolute inset-0 flex items-center">
                 <div class="w-full border-t border-slate-800"></div>
               </div>
-              <span class="relative px-3 bg-slate-900 text-xs text-slate-500 uppercase tracking-wider">第三方登录</span>
+              <span class="relative px-3 bg-slate-900 text-xs text-slate-500 uppercase tracking-wider">第三方注册</span>
             </div>
             {settings.invite_required && (
               <p class="text-xs text-slate-500 text-center">使用第三方注册时也需要填写邀请码</p>
+            )}
+            {hasGitHubProvider && settings.github_min_account_age_days > 0 && (
+              <p class="text-xs text-amber-400/90 text-center bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2">
+                GitHub 账号需满足最短注册 {settings.github_min_account_age_days} 天
+              </p>
             )}
             {oauthProviders.map((p) => (
               <form method="post" action="/register/oauth" class="space-y-2">
@@ -238,16 +184,19 @@ export const RegisterView: FC<{
                 )}
                 <button
                   type="submit"
-                  class="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition duration-200 border border-slate-700 shadow-md active:scale-[0.98]"
+                  class="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition duration-200 border border-slate-700 shadow-md active:scale-[0.98] flex items-center justify-center gap-3"
                 >
-                  使用 {p.name} 注册 / 登录
+                  {p.icon_url ? (
+                    <img src={p.icon_url} alt="" class="w-5 h-5 object-contain bg-white/90 rounded-sm p-0.5" />
+                  ) : null}
+                  <span>使用 {p.name} 注册 / 登录</span>
                 </button>
               </form>
             ))}
           </div>
         )}
 
-<div class="mt-8 pt-6 border-t border-slate-800/60 text-center">
+        <div class="mt-8 pt-6 border-t border-slate-800/60 text-center">
           <p class="text-sm text-slate-400">
             已有账号？{" "}
             <a href="/login" class="font-medium text-emerald-400 hover:text-emerald-300 transition">
