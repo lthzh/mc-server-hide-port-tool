@@ -4,6 +4,7 @@ import { Layout } from './views/Layout'
 import { IndexView } from './views/IndexView'
 import { LoginView } from './views/LoginView'
 import { RegisterView } from './views/RegisterView'
+import { GitHubAgeRejectedView } from './views/GitHubAgeRejectedView'
 import { SetupView } from './views/SetupView'
 import { VerifyEmailView } from './views/VerifyEmailView'
 import { AdminView } from './views/AdminView'
@@ -55,7 +56,14 @@ import {
   revokeInviteCode
 } from './services/invite-codes'
 import { sendVerificationCode } from './services/mailer'
-import { getGitHubUser, githubAgeErrorMessage, meetsAgeRequirement } from './services/github'
+import {
+  getGitHubUser,
+  githubAgeErrorMessage,
+  githubAgeRejectedPath,
+  isGitHubAgeRejectedError,
+  meetsAgeRequirement,
+  parseGitHubAgeRejectedMinDays
+} from './services/github'
 
 type Bindings = CloudflareBindings & {
   BETTER_AUTH_SECRET?: string
@@ -115,8 +123,8 @@ app.all('/api/auth/*', async (c) => {
   const auth = await createAuth(c.env)
   const res = await auth.handler(c.req.raw)
 
-  // GitHub age rejection throws inside getUserInfo; better-auth surfaces it as 5xx.
-  // Convert to a readable browser redirect and avoid leaving partial sessions.
+  // GitHub age rejection throws inside getUserInfo; better-auth surfaces it as 4xx/5xx.
+  // Convert to a dedicated rejection page instead of a raw error/500.
   if (res.status >= 400 && c.req.path.includes('/oauth2/callback/github')) {
     let bodyText = ''
     try {
@@ -124,14 +132,11 @@ app.all('/api/auth/*', async (c) => {
     } catch {
       bodyText = ''
     }
-    if (bodyText.includes('GitHub') && bodyText.includes('天数')) {
+    if (isGitHubAgeRejectedError(bodyText)) {
       const settings = await getSettings(c.env.DB)
-      const msg = encodeURIComponent(
-        `GitHub 账号注册天数不足 ${settings.github_min_account_age_days} 天`
-      )
-      const target =
-        settings.registration_mode === 'email' ? `/login?error=${msg}` : `/register?error=${msg}`
-      return c.redirect(target)
+      const parsed = parseGitHubAgeRejectedMinDays(bodyText)
+      const minDays = parsed ?? settings.github_min_account_age_days
+      return c.redirect(githubAgeRejectedPath(minDays))
     }
   }
   return res
@@ -1049,6 +1054,24 @@ app.post('/register/oauth', async (c) => {
   }
 })
 
+app.get('/register/github-age-rejected', async (c) => {
+  const settings = await getSettings(c.env.DB)
+  const minDays = Math.max(
+    0,
+    Number(c.req.query('min_days') ?? settings.github_min_account_age_days) || 0
+  )
+  const actualDaysRaw = c.req.query('actual_days')
+  const actualDays =
+    actualDaysRaw == null || actualDaysRaw === ''
+      ? null
+      : Math.max(0, Number(actualDaysRaw) || 0)
+  return c.html(
+    <Layout title="GitHub 账号天数未达标">
+      <GitHubAgeRejectedView minDays={minDays} actualDays={actualDays} />
+    </Layout>
+  )
+})
+
 app.get('/register/oauth/done', async (c) => {
   const user = await getCurrentUser(c.env, c.req.raw.headers)
   const settings = await getSettings(c.env.DB)
@@ -1088,18 +1111,26 @@ app.get('/register/oauth/done', async (c) => {
     if (!account) {
       // Not a GitHub-linked signup; nothing to enforce here.
     } else if (!account.accessToken) {
-      return await failOAuthRegister(
-        githubAgeErrorMessage(settings.github_min_account_age_days),
-        403
+      await deleteUserCascade(c.env.DB, user.id)
+      return redirectWithHeaders(
+        githubAgeRejectedPath(settings.github_min_account_age_days),
+        302,
+        new Headers({ 'Set-Cookie': clearInviteCookie })
       )
     } else {
       const ghUser = await getGitHubUser(account.accessToken)
       // Fail closed when GitHub profile cannot be verified under an age limit.
       if (!ghUser || !meetsAgeRequirement(ghUser.created_at, settings.github_min_account_age_days)) {
-        return await failOAuthRegister(
-          githubAgeErrorMessage(settings.github_min_account_age_days),
-          403
-        )
+        await deleteUserCascade(c.env.DB, user.id)
+        const actualDays = ghUser
+          ? (Date.now() - Date.parse(ghUser.created_at)) / 86400000
+          : null
+        const path =
+          githubAgeRejectedPath(settings.github_min_account_age_days) +
+          (actualDays != null && Number.isFinite(actualDays)
+            ? `&actual_days=${encodeURIComponent(String(Math.max(0, Math.floor(actualDays))))}`
+            : '')
+        return redirectWithHeaders(path, 302, new Headers({ 'Set-Cookie': clearInviteCookie }))
       }
     }
   }

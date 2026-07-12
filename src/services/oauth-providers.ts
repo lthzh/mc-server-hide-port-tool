@@ -2,8 +2,8 @@ import { getSettings } from './settings'
 import {
   getGitHubPrimaryEmail,
   getGitHubUser,
-  githubAgeErrorMessage,
-  meetsAgeRequirement
+  meetsAgeRequirement,
+  throwGitHubAgeRejected
 } from './github'
 
 export type OAuthProviderRow = {
@@ -459,7 +459,7 @@ export function toGenericOAuthConfig(row: OAuthProviderRow, db: D1Database) {
             !meetsAgeRequirement(profile.created_at, settings.github_min_account_age_days)
           ) {
             // Throwing aborts OAuth callback before better-auth creates user/session.
-            throw new Error(githubAgeErrorMessage(settings.github_min_account_age_days))
+            throwGitHubAgeRejected(settings.github_min_account_age_days)
           }
         }
 

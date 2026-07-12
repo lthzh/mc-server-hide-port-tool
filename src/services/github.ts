@@ -7,6 +7,9 @@ export type GitHubUser = {
   created_at: string
 }
 
+/** Stable machine code embedded in thrown errors for callback interception. */
+export const GITHUB_ACCOUNT_AGE_REJECTED_CODE = 'GITHUB_ACCOUNT_AGE_REJECTED'
+
 export async function getGitHubUser(accessToken: string): Promise<GitHubUser | null> {
   const res = await fetch('https://api.github.com/user', {
     headers: {
@@ -47,4 +50,25 @@ export function meetsAgeRequirement(createdAt: string, minDays: number): boolean
 
 export function githubAgeErrorMessage(minDays: number): string {
   return `GitHub 账号注册天数不足 ${minDays} 天`
+}
+
+export function throwGitHubAgeRejected(minDays: number): never {
+  // Include both a stable code (for interceptors) and human text.
+  throw new Error(`${GITHUB_ACCOUNT_AGE_REJECTED_CODE}:${minDays} ${githubAgeErrorMessage(minDays)}`)
+}
+
+export function isGitHubAgeRejectedError(text: string | null | undefined): boolean {
+  return !!text && text.includes(GITHUB_ACCOUNT_AGE_REJECTED_CODE)
+}
+
+export function parseGitHubAgeRejectedMinDays(text: string | null | undefined): number | null {
+  if (!text) return null
+  const m = text.match(/GITHUB_ACCOUNT_AGE_REJECTED:(\d+)/)
+  if (!m) return null
+  const n = Number(m[1])
+  return Number.isFinite(n) ? n : null
+}
+
+export function githubAgeRejectedPath(minDays: number): string {
+  return `/register/github-age-rejected?min_days=${encodeURIComponent(String(Math.max(0, minDays)))}`
 }
