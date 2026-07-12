@@ -194,8 +194,19 @@ export function resolveMinSubdomainLength(
 }
 
 export async function deleteUserCascade(db: D1Database, id: string): Promise<void> {
+  const user = await db
+    .prepare('SELECT email FROM user WHERE id = ?')
+    .bind(id)
+    .first<{ email: string }>()
+
   await db.prepare('DELETE FROM dns_record WHERE user_id = ?').bind(id).run()
   await db.prepare('DELETE FROM session WHERE userId = ?').bind(id).run()
   await db.prepare('DELETE FROM account WHERE userId = ?').bind(id).run()
+  // Keep invite history, but detach FK references that would block user deletion.
+  await db.prepare('UPDATE invite_code SET used_by = NULL WHERE used_by = ?').bind(id).run()
+  await db.prepare('DELETE FROM invite_code WHERE created_by = ? AND used_by IS NULL').bind(id).run()
+  if (user?.email) {
+    await db.prepare('DELETE FROM email_verification WHERE email = ?').bind(user.email).run()
+  }
   await db.prepare('DELETE FROM user WHERE id = ?').bind(id).run()
 }

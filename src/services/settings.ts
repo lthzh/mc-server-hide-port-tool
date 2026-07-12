@@ -1,3 +1,4 @@
+import { getCachedSettings, invalidateSettingsCache } from './request-cache'
 export type Settings = {
   registration_enabled: boolean
   registration_mode: 'email' | 'oauth' | 'both'
@@ -69,7 +70,7 @@ export function isEmailAllowed(email: string, s: Settings): { ok: boolean; reaso
   return { ok: true }
 }
 
-export async function getSettings(db: D1Database): Promise<Settings> {
+async function loadSettingsFromDb(db: D1Database): Promise<Settings> {
   const row = await db
     .prepare('SELECT * FROM settings WHERE id = ?')
     .bind('default')
@@ -94,6 +95,10 @@ export async function getSettings(db: D1Database): Promise<Settings> {
     max_records_per_user: row.max_records_per_user ?? DEFAULT_SETTINGS.max_records_per_user,
     min_subdomain_length: row.min_subdomain_length ?? DEFAULT_SETTINGS.min_subdomain_length
   }
+}
+
+export async function getSettings(db: D1Database): Promise<Settings> {
+  return getCachedSettings(db, () => loadSettingsFromDb(db))
 }
 
 export async function updateSettings(
@@ -139,6 +144,7 @@ export async function updateSettings(
     )
     .run()
 
+  invalidateSettingsCache(db)
   return next
 }
 

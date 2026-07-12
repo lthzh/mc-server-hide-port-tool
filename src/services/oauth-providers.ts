@@ -1,3 +1,4 @@
+import { getCachedEnabledOAuthProviders, invalidateOAuthProviderCache } from './request-cache'
 import { getSettings } from './settings'
 import {
   getGitHubPrimaryEmail,
@@ -238,11 +239,15 @@ export async function listOAuthProviders(db: D1Database): Promise<OAuthProviderR
   return result.results ?? []
 }
 
-export async function listEnabledOAuthProviders(db: D1Database): Promise<OAuthProviderRow[]> {
+async function loadEnabledOAuthProviders(db: D1Database): Promise<OAuthProviderRow[]> {
   const result = await db
     .prepare('SELECT * FROM oauth_provider WHERE enabled = 1 ORDER BY sort_order ASC, created_at ASC')
     .all<OAuthProviderRow>()
   return result.results ?? []
+}
+
+export async function listEnabledOAuthProviders(db: D1Database): Promise<OAuthProviderRow[]> {
+  return getCachedEnabledOAuthProviders(db, () => loadEnabledOAuthProviders(db))
 }
 
 export async function listPublicOAuthProviders(db: D1Database): Promise<OAuthProviderPublic[]> {
@@ -326,6 +331,7 @@ export async function createOAuthProvider(
     )
     .run()
 
+  invalidateOAuthProviderCache(db)
   return { ok: true, provider: row }
 }
 
@@ -390,11 +396,13 @@ export async function updateOAuthProvider(
 
   const updated = await findOAuthProviderById(db, id)
   if (!updated) return { ok: false, message: '更新失败' }
+  invalidateOAuthProviderCache(db)
   return { ok: true, provider: updated }
 }
 
 export async function deleteOAuthProvider(db: D1Database, id: string): Promise<void> {
   await db.prepare('DELETE FROM oauth_provider WHERE id = ?').bind(id).run()
+  invalidateOAuthProviderCache(db)
 }
 
 export async function setOAuthProviderEnabled(
@@ -406,6 +414,7 @@ export async function setOAuthProviderEnabled(
     .prepare('UPDATE oauth_provider SET enabled = ?, updated_at = ? WHERE id = ?')
     .bind(enabled ? 1 : 0, Date.now(), id)
     .run()
+  invalidateOAuthProviderCache(db)
 }
 
 export function toGenericOAuthConfig(row: OAuthProviderRow, db: D1Database) {

@@ -34,6 +34,7 @@ pnpm wrangler d1 migrations apply mc-server-hide-port-tool-db --remote
 - `0003_invite_codes.sql` — 邀请码表
 - `0004_oauth_providers.sql` — 通用 OAuth 应用配置表
 - `0005_oauth_unify_github.sql` — OAuth 增加 `icon_url`；注册模式 `github` 归一为 `oauth`
+- `0006_schema_hardening.sql` - unique indexes, index cleanup, expiry indexes
 
 本地开发用 `--local` 应用同一套迁移。
 
