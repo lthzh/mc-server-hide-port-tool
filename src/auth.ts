@@ -22,7 +22,7 @@ export async function createAuth(
   const providers =
     oauthProviders ?? (await listEnabledOAuthProviders(env.DB).catch(() => [] as OAuthProviderRow[]))
 
-  const genericConfigs = providers.map(toGenericOAuthConfig)
+  const genericConfigs = providers.map((p) => toGenericOAuthConfig(p, env.DB))
 
   return betterAuth({
     appName: env.APP_NAME || 'hide-port-tool',

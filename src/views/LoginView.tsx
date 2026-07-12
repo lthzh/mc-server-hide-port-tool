@@ -91,7 +91,7 @@ export const LoginView: FC<{
                   class="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition duration-200 border border-slate-700 shadow-md active:scale-[0.98] flex items-center justify-center gap-3"
                 >
                   {p.icon_url ? (
-                    <img src={p.icon_url} alt="" class="w-5 h-5 object-contain bg-white/90 rounded-sm p-0.5" />
+                    <img src={p.icon_url} alt="" class="w-5 h-5 object-contain rounded-full" />
                   ) : null}
                   <span>使用 {p.name} 登录</span>
                 </button>

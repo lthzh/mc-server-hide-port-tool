@@ -55,7 +55,7 @@ import {
   revokeInviteCode
 } from './services/invite-codes'
 import { sendVerificationCode } from './services/mailer'
-import { getGitHubUser, meetsAgeRequirement } from './services/github'
+import { getGitHubUser, githubAgeErrorMessage, meetsAgeRequirement } from './services/github'
 
 type Bindings = CloudflareBindings & {
   BETTER_AUTH_SECRET?: string
@@ -113,7 +113,28 @@ const app = new Hono<{ Bindings: Bindings }>()
 
 app.all('/api/auth/*', async (c) => {
   const auth = await createAuth(c.env)
-  return auth.handler(c.req.raw)
+  const res = await auth.handler(c.req.raw)
+
+  // GitHub age rejection throws inside getUserInfo; better-auth surfaces it as 5xx.
+  // Convert to a readable browser redirect and avoid leaving partial sessions.
+  if (res.status >= 400 && c.req.path.includes('/oauth2/callback/github')) {
+    let bodyText = ''
+    try {
+      bodyText = await res.clone().text()
+    } catch {
+      bodyText = ''
+    }
+    if (bodyText.includes('GitHub') && bodyText.includes('天数')) {
+      const settings = await getSettings(c.env.DB)
+      const msg = encodeURIComponent(
+        `GitHub 账号注册天数不足 ${settings.github_min_account_age_days} 天`
+      )
+      const target =
+        settings.registration_mode === 'email' ? `/login?error=${msg}` : `/register?error=${msg}`
+      return c.redirect(target)
+    }
+  }
+  return res
 })
 
 app.get('/api/domains', async (c) => {
@@ -519,9 +540,10 @@ app.get('/register', async (c) => {
   if (user) return c.redirect('/')
   const settings = await getSettings(c.env.DB)
   const oauthProviders = await listPublicOAuthProviders(c.env.DB)
+  const error = c.req.query('error') || undefined
   return c.html(
     <Layout title="注册">
-      <RegisterView settings={settings} oauthProviders={oauthProviders} />
+      <RegisterView settings={settings} oauthProviders={oauthProviders} error={error} />
     </Layout>
   )
 })
@@ -1054,7 +1076,7 @@ app.get('/register/oauth/done', async (c) => {
   const createdAtMs = new Date(user.createdAt).getTime()
   const isNewUser = Number.isFinite(createdAtMs) && Date.now() - createdAtMs < 5 * 60 * 1000
 
-  // Keep GitHub account-age restriction after merging GitHub into generic OAuth
+  // Defense-in-depth: if a brand-new GitHub user somehow got created, re-check age and roll back.
   if (isNewUser && settings.github_min_account_age_days > 0) {
     const account = await c.env.DB
       .prepare(
@@ -1062,11 +1084,20 @@ app.get('/register/oauth/done', async (c) => {
       )
       .bind(user.id)
       .first<{ accessToken: string | null }>()
-    if (account?.accessToken) {
+
+    if (!account) {
+      // Not a GitHub-linked signup; nothing to enforce here.
+    } else if (!account.accessToken) {
+      return await failOAuthRegister(
+        githubAgeErrorMessage(settings.github_min_account_age_days),
+        403
+      )
+    } else {
       const ghUser = await getGitHubUser(account.accessToken)
-      if (ghUser && !meetsAgeRequirement(ghUser.created_at, settings.github_min_account_age_days)) {
+      // Fail closed when GitHub profile cannot be verified under an age limit.
+      if (!ghUser || !meetsAgeRequirement(ghUser.created_at, settings.github_min_account_age_days)) {
         return await failOAuthRegister(
-          `GitHub 账号注册天数不足 ${settings.github_min_account_age_days} 天`,
+          githubAgeErrorMessage(settings.github_min_account_age_days),
           403
         )
       }

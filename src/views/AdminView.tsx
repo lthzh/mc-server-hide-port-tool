@@ -385,7 +385,7 @@ export const AdminView: FC<{
                       <td class="py-4 px-4 font-mono-custom text-emerald-400 text-xs">{p.provider_id}</td>
                       <td class="py-4 px-4 text-white">
                         <div class="flex items-center gap-2">
-                          {p.icon_url ? <img src={p.icon_url} alt="" class="w-4 h-4 object-contain bg-white/90 rounded-sm p-0.5" /> : null}
+                          {p.icon_url ? <img src={p.icon_url} alt="" class="w-4 h-4 object-contain rounded-full" /> : null}
                           <span>{p.name}</span>
                         </div>
                       </td>

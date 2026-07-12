@@ -1,3 +1,11 @@
+import { getSettings } from './settings'
+import {
+  getGitHubPrimaryEmail,
+  getGitHubUser,
+  githubAgeErrorMessage,
+  meetsAgeRequirement
+} from './github'
+
 export type OAuthProviderRow = {
   id: string
   provider_id: string
@@ -400,7 +408,7 @@ export async function setOAuthProviderEnabled(
     .run()
 }
 
-export function toGenericOAuthConfig(row: OAuthProviderRow) {
+export function toGenericOAuthConfig(row: OAuthProviderRow, db: D1Database) {
   const base = {
     providerId: row.provider_id,
     clientId: row.client_id,
@@ -419,43 +427,44 @@ export function toGenericOAuthConfig(row: OAuthProviderRow) {
       async getUserInfo(tokens: { accessToken?: string | null }) {
         const accessToken = tokens.accessToken
         if (!accessToken) return null
-        const userRes = await fetch('https://api.github.com/user', {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            Accept: 'application/vnd.github+json',
-            'User-Agent': 'hide-port-tool'
-          }
-        })
-        if (!userRes.ok) return null
-        const profile = (await userRes.json()) as {
-          id?: number | string
-          login?: string
-          name?: string | null
-          email?: string | null
-          avatar_url?: string | null
-        }
+
+        const profile = await getGitHubUser(accessToken)
+        if (!profile?.id) return null
+
+        const accountId = String(profile.id)
         let email = profile.email || null
         if (!email) {
-          const emailsRes = await fetch('https://api.github.com/user/emails', {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              Accept: 'application/vnd.github+json',
-              'User-Agent': 'hide-port-tool'
-            }
-          })
-          if (emailsRes.ok) {
-            const emails = (await emailsRes.json()) as Array<{
-              email?: string
-              primary?: boolean
-              verified?: boolean
-            }>
-            const primary = emails.find((e) => e.primary && e.email) || emails.find((e) => e.email)
-            email = primary?.email ?? null
+          email = await getGitHubPrimaryEmail(accessToken)
+        }
+        if (!email) return null
+
+        // Only enforce age for brand-new local accounts. Existing linked users may still log in.
+        const existingAccount = await db
+          .prepare(
+            "SELECT id FROM account WHERE providerId = 'github' AND accountId = ? LIMIT 1"
+          )
+          .bind(accountId)
+          .first<{ id: string }>()
+        const existingUser = existingAccount
+          ? null
+          : await db
+              .prepare('SELECT id FROM user WHERE email = ? LIMIT 1')
+              .bind(email.toLowerCase())
+              .first<{ id: string }>()
+
+        if (!existingAccount && !existingUser) {
+          const settings = await getSettings(db)
+          if (
+            settings.github_min_account_age_days > 0 &&
+            !meetsAgeRequirement(profile.created_at, settings.github_min_account_age_days)
+          ) {
+            // Throwing aborts OAuth callback before better-auth creates user/session.
+            throw new Error(githubAgeErrorMessage(settings.github_min_account_age_days))
           }
         }
-        if (!profile.id || !email) return null
+
         return {
-          id: String(profile.id),
+          id: accountId,
           name: profile.name || profile.login || email,
           email,
           image: profile.avatar_url || undefined,
