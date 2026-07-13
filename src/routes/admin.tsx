@@ -117,20 +117,47 @@ export function registerAdminRoutes(app: Hono<{ Bindings: Bindings }>) {
 
     const whitelistSuffixesRaw = String(form.get('email_whitelist_suffixes') ?? '').trim()
     const blacklistSuffixesRaw = String(form.get('email_blacklist_suffixes') ?? '').trim()
-    const resendApiKeysRaw = String(form.get('resend_api_keys') ?? form.get('resend_api_key') ?? '')
-    const resendFromsRaw = String(form.get('resend_froms') ?? form.get('resend_from') ?? '')
-    // Empty keys field means keep existing keys (common for password-like secret fields).
-    // From addresses can be updated independently when keys are left blank.
-    let resend_accounts = current.resend_accounts
-    const keysProvided = resendApiKeysRaw.trim().length > 0
-    const fromsProvided = resendFromsRaw.trim().length > 0
-    if (keysProvided || fromsProvided) {
-      const parsed = parseResendAccounts(
-        keysProvided ? resendApiKeysRaw : JSON.stringify(current.resend_accounts.map((a) => a.api_key)),
-        fromsProvided ? resendFromsRaw : JSON.stringify(current.resend_accounts.map((a) => a.from))
-      )
-      resend_accounts = parsed
+    const primaryKeyRaw = String(form.get('resend_api_key') ?? '').trim()
+    const primaryFromRaw = String(form.get('resend_from') ?? '').trim()
+    const accountFromsRaw = String(form.get('resend_account_froms') ?? '').trim()
+    const accountKeysRaw = String(form.get('resend_account_keys') ?? '').trim()
+
+    // Build ordered accounts from modal list when present; otherwise fall back to primary fields.
+    const fromLines = (accountFromsRaw || primaryFromRaw)
+      .split(/\r?\n/)
+      .map((x) => x.trim())
+      .filter(Boolean)
+    const keyLines = accountKeysRaw
+      .split(/\r?\n/)
+      .map((x) => x.trim())
+
+    const froms = fromLines.length > 0 ? fromLines : (primaryFromRaw ? [primaryFromRaw] : [])
+    // Primary form fields always represent the first account.
+    if (primaryFromRaw) {
+      if (froms.length === 0) froms.push(primaryFromRaw)
+      else froms[0] = primaryFromRaw
     }
+    // Primary key field overrides first key line when provided.
+    if (primaryKeyRaw) {
+      if (keyLines.length === 0) keyLines.push(primaryKeyRaw)
+      else keyLines[0] = primaryKeyRaw
+    }
+
+    const prev = current.resend_accounts || []
+    const prevByFrom = new Map(prev.map((a) => [a.from, a.api_key] as const))
+    const nextAccounts = [] as { api_key: string; from: string }[]
+    for (let i = 0; i < froms.length; i++) {
+      const from = froms[i]!
+      const typedKey = (keyLines[i] || '').trim()
+      const isKeep = !typedKey || typedKey === '__KEEP__'
+      const api_key = isKeep
+        ? (prevByFrom.get(from) || prev[i]?.api_key || '')
+        : typedKey
+      if (api_key && from) nextAccounts.push({ api_key, from })
+    }
+    // If user cleared all froms, clear accounts.
+    // If they only left primary key blank and from blank intentionally, nextAccounts may be empty.
+    const resend_accounts = nextAccounts
 
     const patch: Partial<Settings> = {
       registration_enabled: form.get('registration_enabled') === 'on',

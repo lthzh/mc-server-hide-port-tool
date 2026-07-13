@@ -1,4 +1,3 @@
-import { raw } from 'hono/html'
 import type { FC } from 'hono/jsx'
 import type { DnsRecordRow, UserListRow } from '../services/dns-records'
 import type { InviteCodeRow } from '../services/invite-codes'
@@ -283,6 +282,7 @@ export const AdminView: FC<{
                       type="button"
                       id="mail-test-open"
                       class="shrink-0 px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-md transition"
+                      onclick="if(window.__adminMail){window.__adminMail.openMailTest(event)}else{var m=document.getElementById('mail-test-modal');if(m){m.classList.remove('hidden');document.body.style.overflow='hidden'}}"
                     >
                       测试发信
                     </button>
@@ -306,41 +306,45 @@ export const AdminView: FC<{
                   </div>
 
                   <div class="space-y-4">
-                    <div>
-                      <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Resend API Keys</label>
-                      <textarea
-                        name="resend_api_keys"
-                        rows={Math.max(3, (settings.resend_accounts?.length || 1) + 1)}
-                        placeholder={settings.resend_accounts?.length ? `已配置 ${settings.resend_accounts.length} 个 Key（留空则不更新密钥）\n可填写多个，每行一个` : 're_xxx_1\nre_xxx_2'}
-                        class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition font-mono-custom text-sm"
-                      ></textarea>
-                      <p class="mt-1.5 text-xs text-slate-500">支持多个 Key，每行一个。前一个达到限额或失败时，会自动静默切换到下一个。</p>
-                    </div>
-                    <div>
-                      <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">发件人地址（与 Key 一一对应）</label>
-                      <textarea
-                        name="resend_froms"
-                        rows={Math.max(3, (settings.resend_accounts?.length || 1) + 1)}
-                        value={(settings.resend_accounts || []).map((a) => a.from).join('\n')}
-                        placeholder={'noreply@domain-a.com\nnoreply@domain-b.com'}
-                        class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition font-mono-custom text-sm"
-                      ></textarea>
-                      <p class="mt-1.5 text-xs text-slate-500">每行一个发件人，顺序需与上方 API Key 对应。不同 Key 可绑定不同发件域名。</p>
-                    </div>
-                    {(settings.resend_accounts?.length > 0) && (
-                      <div class="rounded-md border border-slate-800 bg-slate-900/50 p-3">
-                        <div class="text-xs font-semibold text-slate-400 mb-2">当前已配置账号（按优先级）</div>
-                        <div class="space-y-1">
-                          {(settings.resend_accounts || []).map((a, idx) => (
-                            <div class="text-xs text-slate-300 font-mono-custom">
-                              #{idx + 1} ? {a.from} ? key ???{a.api_key.slice(-4)}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                    <input type="hidden" id="resend-account-froms" name="resend_account_froms" value={(settings.resend_accounts || []).map((a) => a.from).join('\n')} />
+                    <input type="hidden" id="resend-account-keys" name="resend_account_keys" value={(settings.resend_accounts || []).map(() => '__KEEP__').join('\n')} />
 
+                    <div>
+                      <div class="flex items-center justify-between gap-2 mb-2">
+                        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Resend API Key</label>
+                        <button
+                          type="button"
+                          id="resend-accounts-open"
+                          class="inline-flex items-center justify-center min-w-7 h-7 px-1.5 rounded-md border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm leading-none transition"
+                          title="管理发件账号"
+                          onclick="if(window.__adminMail){window.__adminMail.openAccounts(event)}else{var m=document.getElementById('resend-accounts-modal');if(m){m.classList.remove('hidden');document.body.style.overflow='hidden'}}"
+                        >
+                          +{(settings.resend_accounts?.length || 0) > 1 ? (
+                            <span class="ml-0.5 text-[10px] text-emerald-400 font-semibold">{settings.resend_accounts.length}</span>
+                          ) : null}
+                        </button>
+                      </div>
+                      <input
+                        type="password"
+                        name="resend_api_key"
+                        id="resend-primary-key"
+                        placeholder={settings.resend_accounts?.[0]?.api_key ? '已配置（留空则不更新）' : 're_xxxxxxxx'}
+                        class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                      />
+                    </div>
+                    <div>
+                      <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">发件人地址</label>
+                      <input
+                        type="email"
+                        name="resend_from"
+                        id="resend-primary-from"
+                        value={settings.resend_accounts?.[0]?.from ?? ''}
+                        placeholder="noreply@yourdomain.com"
+                        class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                      />
+                      <p class="mt-1.5 text-xs text-slate-500">默认显示第一组配置。点击右侧 + 可管理多个发件邮箱与对应 API Key。</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -908,6 +912,35 @@ export const AdminView: FC<{
         </section>
         )}
 
+      
+      <div id="resend-accounts-modal" class="hidden fixed inset-0 z-50">
+        <div id="resend-accounts-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-[2px]"></div>
+        <div class="relative z-10 min-h-full flex items-center justify-center p-4">
+          <div class="w-full max-w-2xl rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl shadow-black/50">
+            <div class="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+              <div>
+                <div class="text-base font-bold text-white">发件账号管理</div>
+                <div class="text-xs text-slate-500 mt-1">按优先级配置多个发件邮箱与对应 API Key</div>
+              </div>
+              <button type="button" id="resend-accounts-close" class="px-2 py-1 text-slate-400 hover:text-white transition">×</button>
+            </div>
+            <div class="px-5 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div id="resend-accounts-list" class="space-y-3"></div>
+              <button
+                type="button"
+                id="resend-account-add"
+                class="w-full py-2.5 text-sm rounded-lg border border-dashed border-slate-700 text-slate-300 hover:bg-slate-900 hover:text-white transition"
+              >+ 添加发件账号</button>
+              <p class="text-xs text-slate-500">密钥留空表示保留原密钥。第一项会同步到主表单显示。</p>
+            </div>
+            <div class="flex justify-end gap-2 px-5 py-4 border-t border-slate-800">
+              <button type="button" id="resend-accounts-cancel" class="px-4 py-2 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition">取消</button>
+              <button type="button" id="resend-accounts-apply" class="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition">完成</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div id="mail-test-modal" class="hidden fixed inset-0 z-50">
         <div id="mail-test-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-[2px]"></div>
         <div class="relative z-10 min-h-full flex items-center justify-center p-4">
@@ -917,7 +950,7 @@ export const AdminView: FC<{
                 <div class="text-base font-bold text-white">测试发信</div>
                 <div class="text-xs text-slate-500 mt-1">使用当前已保存的 Resend 配置发送测试邮件</div>
               </div>
-              <button type="button" id="mail-test-close" class="px-2 py-1 text-slate-400 hover:text-white transition">?</button>
+              <button type="button" id="mail-test-close" class="px-2 py-1 text-slate-400 hover:text-white transition">×</button>
             </div>
             <form method="post" action="/admin/mail/test" class="px-5 py-4 space-y-4">
               {csrfField}
@@ -941,42 +974,7 @@ export const AdminView: FC<{
         </div>
       </div>
 
-      <script>{raw(`
-        (function () {
-          var openBtn = document.getElementById('mail-test-open');
-          var modal = document.getElementById('mail-test-modal');
-          var backdrop = document.getElementById('mail-test-backdrop');
-          var closeBtn = document.getElementById('mail-test-close');
-          var cancelBtn = document.getElementById('mail-test-cancel');
-          var input = document.getElementById('mail-test-to');
-          if (!openBtn || !modal) return;
-
-          function openModal() {
-            modal.classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
-            if (input) {
-              setTimeout(function () { input.focus(); }, 0);
-            }
-          }
-          function closeModal() {
-            modal.classList.add('hidden');
-            document.body.style.overflow = '';
-          }
-
-          openBtn.addEventListener('click', function (e) {
-            e.preventDefault();
-            e.stopPropagation();
-            openModal();
-          });
-          if (backdrop) backdrop.addEventListener('click', closeModal);
-          if (closeBtn) closeBtn.addEventListener('click', closeModal);
-          if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
-          document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
-          });
-        })();
-      `)}</script>
-
+      <script src="/static/admin-mail.js" defer></script>
     </main>
     </div>
   )
