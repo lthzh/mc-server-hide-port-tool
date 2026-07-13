@@ -1,3 +1,4 @@
+import { raw } from 'hono/html'
 import type { FC } from 'hono/jsx'
 import type { DnsRecordRow, UserListRow } from '../services/dns-records'
 import type { InviteCodeRow } from '../services/invite-codes'
@@ -50,8 +51,12 @@ export const AdminView: FC<{
   oauthError?: string
   oauthInfo?: string
   csrfToken: string
+  mailError?: string
+  mailInfo?: string
 }> = ({ users, records, settings, inviteCodes, oauthProviders, oauthTemplates = [], currentUserId, currentUserSuperAdmin, activeTab = 'settings', createError, inviteError, inviteInfo, oauthError, oauthInfo,
-  csrfToken
+  csrfToken,
+  mailError,
+  mailInfo
 }) => {
   const csrfField = (
     <input type="hidden" name="csrf_token" value={csrfToken} />
@@ -298,6 +303,62 @@ export const AdminView: FC<{
                         placeholder="noreply@yourdomain.com"
                         class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
                       />
+                    </div>
+                  </div>
+
+                  {(mailError || mailInfo) && (
+                    <div class={`mt-4 p-3 rounded-md text-sm border ${mailError ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>
+                      {mailError || mailInfo}
+                    </div>
+                  )}
+
+                  <div class="mt-5 pt-4 border-t border-slate-800">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                      <div>
+                        <div class="text-sm font-medium text-slate-200">测试发信</div>
+                        <div class="text-xs text-slate-500 mt-1">使用当前已保存的 Resend 配置发送一封测试邮件</div>
+                      </div>
+                      <button
+                        type="button"
+                        id="mail-test-toggle"
+                        class="px-4 py-2 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-md transition"
+                      >
+                        测试发信
+                      </button>
+                    </div>
+
+                    <div id="mail-test-panel" class="hidden rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+                      <form method="post" action="/admin/mail/test" class="space-y-3">
+                        {csrfField}
+                        <div>
+                          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2" for="mail-test-to">
+                            接收邮箱
+                          </label>
+                          <input
+                            id="mail-test-to"
+                            type="email"
+                            name="to_email"
+                            required
+                            placeholder="you@example.com"
+                            class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+                          />
+                        </div>
+                        <div class="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            id="mail-test-cancel"
+                            class="px-4 py-2 text-sm bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-md transition"
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="submit"
+                            class="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded-md transition"
+                          >
+                            发送
+                          </button>
+                        </div>
+                      </form>
                     </div>
                   </div>
                 </div>
@@ -868,7 +929,29 @@ export const AdminView: FC<{
         </section>
         )}
 
-      </main>
+      <script>{raw(`
+        (function () {
+          var toggle = document.getElementById('mail-test-toggle');
+          var panel = document.getElementById('mail-test-panel');
+          var cancel = document.getElementById('mail-test-cancel');
+          var input = document.getElementById('mail-test-to');
+          if (!toggle || !panel) return;
+          function openPanel() {
+            panel.classList.remove('hidden');
+            if (input) input.focus();
+          }
+          function closePanel() {
+            panel.classList.add('hidden');
+          }
+          toggle.addEventListener('click', function () {
+            if (panel.classList.contains('hidden')) openPanel();
+            else closePanel();
+          });
+          if (cancel) cancel.addEventListener('click', closePanel);
+        })();
+      `)}</script>
+
+    </main>
     </div>
   )
 }

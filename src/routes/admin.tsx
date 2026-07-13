@@ -20,6 +20,7 @@ import {
   listInviteCodes,
   revokeInviteCode
 } from '../services/invite-codes'
+import { sendTestEmail } from '../services/mailer'
 import {
   createOAuthProvider,
   deleteOAuthProvider,
@@ -64,7 +65,9 @@ export function registerAdminRoutes(app: Hono<{ Bindings: Bindings }>) {
             ? 'invites'
             : c.req.query('oauth_error') || c.req.query('oauth_info')
               ? 'oauth'
-              : 'settings'
+              : c.req.query('mail_error') || c.req.query('mail_info')
+                ? 'settings'
+                : 'settings'
     const activeTab = inferredTab
     const [users, records, settings, inviteCodes, oauthProviders] = await Promise.all([
       listAllUsers(c.env.DB),
@@ -92,6 +95,8 @@ export function registerAdminRoutes(app: Hono<{ Bindings: Bindings }>) {
           inviteInfo={c.req.query('invite_info') ?? undefined}
           oauthError={c.req.query('oauth_error') ?? undefined}
           oauthInfo={c.req.query('oauth_info') ?? undefined}
+          mailError={c.req.query('mail_error') ?? undefined}
+          mailInfo={c.req.query('mail_info') ?? undefined}
         />
       </Layout>
     )
@@ -364,5 +369,32 @@ export function registerAdminRoutes(app: Hono<{ Bindings: Bindings }>) {
     const id = c.req.param('id')
     await deleteOAuthProvider(c.env.DB, id)
     return c.redirect(adminPath('oauth', { oauth_info: '已删除' }))
+  })
+
+  app.post('/admin/mail/test', async (c) => {
+    const admin = await requireAdmin(c.env, c.req.raw.headers)
+    if (!admin) return c.redirect('/')
+    const form = await c.req.formData()
+    const csrfDenied = await requireMutationCsrf(c, form)
+    if (csrfDenied) return csrfDenied
+
+    const toEmail = String(form.get('to_email') ?? '').trim()
+    if (!toEmail || !toEmail.includes('@')) {
+      return c.redirect(adminPath('settings', { mail_error: '\u8bf7\u8f93\u5165\u6709\u6548\u7684\u63a5\u6536\u90ae\u7bb1' }))
+    }
+
+    const result = await sendTestEmail(c.env, toEmail)
+    if (!result.ok) {
+      return c.redirect(
+        adminPath('settings', {
+          mail_error: result.message || '\u6d4b\u8bd5\u90ae\u4ef6\u53d1\u9001\u5931\u8d25'
+        })
+      )
+    }
+    return c.redirect(
+      adminPath('settings', {
+        mail_info: `\u6d4b\u8bd5\u90ae\u4ef6\u5df2\u53d1\u9001\u81f3 ${toEmail}`
+      })
+    )
   })
 }
