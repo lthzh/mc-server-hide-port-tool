@@ -14,7 +14,7 @@ export const RegisterView: FC<{
   const showOAuth =
     (settings.registration_mode === 'oauth' || settings.registration_mode === 'both') &&
     settings.registration_enabled
-  const needVerification = settings.resend_enabled && showEmail
+  const needVerification = settings.resend_enabled && settings.resend_accounts.length > 0 && showEmail
   const hasGitHubProvider = oauthProviders.some((p) => p.provider_id === 'github')
 
   return (

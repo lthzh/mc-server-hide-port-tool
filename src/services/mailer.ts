@@ -1,4 +1,4 @@
-import { getSettings } from './settings'
+import { getSettings, type ResendAccount } from './settings'
 
 type MailTemplateInput = {
   title: string
@@ -41,9 +41,6 @@ function renderMetaLines(metaLines: string[] | undefined): string {
   return `<div style="margin-top:22px;padding-top:16px;border-top:1px solid #e2e8f0;">${rows}</div>`
 }
 
-/**
- * Shared HTML email template for verification codes and admin test mails.
- */
 export function renderMailTemplate(input: MailTemplateInput): string {
   const brand = 'Minecraft 端口隐藏工具'
   const eyebrow = escapeHtml(input.eyebrow || brand)
@@ -114,19 +111,62 @@ export function renderMailTemplate(input: MailTemplateInput): string {
 </html>`
 }
 
+function isRetriableResendStatus(status: number): boolean {
+  return (
+    status === 401 ||
+    status === 403 ||
+    status === 422 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  )
+}
+
+async function sendWithAccount(
+  account: ResendAccount,
+  input: { toEmail: string; subject: string; html: string }
+): Promise<{ ok: true } | { ok: false; status: number; message: string; retriable: boolean }> {
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${account.api_key}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: account.from,
+      to: [input.toEmail],
+      subject: input.subject,
+      html: input.html
+    })
+  })
+
+  if (res.ok) return { ok: true }
+
+  const text = await res.text().catch(() => '')
+  const message = `Resend API 错误：${res.status} ${text.slice(0, 200)}`
+  return {
+    ok: false,
+    status: res.status,
+    message,
+    retriable: isRetriableResendStatus(res.status)
+  }
+}
+
 export async function sendResendEmail(
   env: { DB: D1Database },
   input: {
     toEmail: string
     subject: string
     html: string
-    /** When true, allow sending even if resend_enabled is off (admin test). */
     ignoreEnabledFlag?: boolean
   }
 ): Promise<{ ok: boolean; message?: string }> {
   const settings = await getSettings(env.DB)
+  const accounts = settings.resend_accounts || []
 
-  if (!settings.resend_api_key || !settings.resend_from) {
+  if (accounts.length === 0) {
     return { ok: false, message: '后端未配置 Resend API Key 或发件人地址' }
   }
   if (!input.ignoreEnabledFlag && !settings.resend_enabled) {
@@ -138,29 +178,31 @@ export async function sendResendEmail(
     return { ok: false, message: '请输入有效的邮箱地址' }
   }
 
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${settings.resend_api_key}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      from: settings.resend_from,
-      to: [toEmail],
-      subject: input.subject,
-      html: input.html
-    })
-  })
+  const errors: string[] = []
+  for (let i = 0; i < accounts.length; i++) {
+    const account = accounts[i]!
+    try {
+      const result = await sendWithAccount(account, {
+        toEmail,
+        subject: input.subject,
+        html: input.html
+      })
+      if (result.ok) return { ok: true }
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    return {
-      ok: false,
-      message: `Resend API 错误：${res.status} ${text.slice(0, 200)}`
+      errors.push(`#${i + 1} ${account.from}: ${result.message}`)
+      // Always try next account silently until all are exhausted.
+      if (i < accounts.length - 1) continue
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '网络错误'
+      errors.push(`#${i + 1} ${account.from}: ${msg}`)
+      if (i < accounts.length - 1) continue
     }
   }
 
-  return { ok: true }
+  return {
+    ok: false,
+    message: errors[errors.length - 1] || '所有 Resend 账号均发送失败'
+  }
 }
 
 export async function sendVerificationCode(
@@ -197,12 +239,9 @@ export async function sendTestEmail(
     intro: '这是一封来自管理后台的测试邮件。如果你收到了它，说明 Resend 配置工作正常。',
     highlightLabel: '测试状态',
     highlight: 'OK',
-    paragraphs: [
-      '你可以继续使用当前邮件配置发送注册验证码。'
-    ],
+    paragraphs: ['你可以继续使用当前邮件配置发送注册验证码。'],
     metaLines: [`发送时间：${now}`, `接收邮箱：${toEmail}`],
     footerNote: '若未收到此邮件，请检查垃圾箱、发件域名配置以及 Resend API Key。'
   })
-  // Admin test should work as long as credentials exist, even if open registration mail is disabled.
   return await sendResendEmail(env, { toEmail, subject, html, ignoreEnabledFlag: true })
 }

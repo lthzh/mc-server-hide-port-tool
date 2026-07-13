@@ -2,7 +2,7 @@ import type { Hono } from 'hono'
 import { createAuth, isSuperAdminUser, requireAdmin } from '../auth'
 import { Layout } from '../views/Layout'
 import { AdminView } from '../views/AdminView'
-import { getSettings, updateSettings, type Settings } from '../services/settings'
+import { getSettings, updateSettings, type Settings, parseResendAccounts } from '../services/settings'
 import {
   deleteUserCascade,
   findRecordById,
@@ -117,7 +117,21 @@ export function registerAdminRoutes(app: Hono<{ Bindings: Bindings }>) {
 
     const whitelistSuffixesRaw = String(form.get('email_whitelist_suffixes') ?? '').trim()
     const blacklistSuffixesRaw = String(form.get('email_blacklist_suffixes') ?? '').trim()
-    const resendApiKeyFromForm = String(form.get('resend_api_key') ?? '').trim()
+    const resendApiKeysRaw = String(form.get('resend_api_keys') ?? form.get('resend_api_key') ?? '')
+    const resendFromsRaw = String(form.get('resend_froms') ?? form.get('resend_from') ?? '')
+    // Empty keys field means keep existing keys (common for password-like secret fields).
+    // From addresses can be updated independently when keys are left blank.
+    let resend_accounts = current.resend_accounts
+    const keysProvided = resendApiKeysRaw.trim().length > 0
+    const fromsProvided = resendFromsRaw.trim().length > 0
+    if (keysProvided || fromsProvided) {
+      const parsed = parseResendAccounts(
+        keysProvided ? resendApiKeysRaw : JSON.stringify(current.resend_accounts.map((a) => a.api_key)),
+        fromsProvided ? resendFromsRaw : JSON.stringify(current.resend_accounts.map((a) => a.from))
+      )
+      resend_accounts = parsed
+    }
+
     const patch: Partial<Settings> = {
       registration_enabled: form.get('registration_enabled') === 'on',
       registration_mode: modeNorm,
@@ -128,14 +142,9 @@ export function registerAdminRoutes(app: Hono<{ Bindings: Bindings }>) {
       email_blacklist_suffixes: splitCsv(blacklistSuffixesRaw),
       github_min_account_age_days: Math.max(0, Number(form.get('github_min_account_age_days') ?? 0) || 0),
       resend_enabled: form.get('resend_enabled') === 'on',
-      resend_from: String(form.get('resend_from') ?? '').trim() || null,
+      resend_accounts,
       max_records_per_user: Math.max(0, Number(form.get('max_records_per_user') ?? 0) || 0),
       min_subdomain_length: Math.max(0, Number(form.get('min_subdomain_length') ?? 0) || 0)
-    }
-    if (resendApiKeyFromForm) {
-      patch.resend_api_key = resendApiKeyFromForm
-    } else if (!current.resend_api_key) {
-      patch.resend_api_key = null
     }
 
     await updateSettings(c.env.DB, patch)

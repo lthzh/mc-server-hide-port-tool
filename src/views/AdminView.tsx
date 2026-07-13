@@ -283,7 +283,9 @@ export const AdminView: FC<{
                       type="button"
                       id="mail-test-open"
                       class="shrink-0 px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-md transition"
-                    >测试发信</button>
+                    >
+                      测试发信
+                    </button>
                   </div>
 
                   {(mailError || mailInfo) && (
@@ -300,33 +302,47 @@ export const AdminView: FC<{
                       checked={settings.resend_enabled}
                       class="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 bg-slate-900 border-slate-700"
                     />
-                    <label for="resend_enabled" class="text-sm font-medium text-slate-200 cursor-pointer">???????????</label>
+                    <label for="resend_enabled" class="text-sm font-medium text-slate-200 cursor-pointer">启用邮箱接收验证码注册</label>
                   </div>
 
                   <div class="space-y-4">
                     <div>
-                      <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Resend API Key</label>
-                      <input
-                        type="password"
-                        name="resend_api_key"
-                        placeholder={settings.resend_api_key ? '???????????' : 're_xxxxxxxx'}
-                        class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
-                      />
+                      <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Resend API Keys</label>
+                      <textarea
+                        name="resend_api_keys"
+                        rows={Math.max(3, (settings.resend_accounts?.length || 1) + 1)}
+                        placeholder={settings.resend_accounts?.length ? `已配置 ${settings.resend_accounts.length} 个 Key（留空则不更新密钥）\n可填写多个，每行一个` : 're_xxx_1\nre_xxx_2'}
+                        class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition font-mono-custom text-sm"
+                      ></textarea>
+                      <p class="mt-1.5 text-xs text-slate-500">支持多个 Key，每行一个。前一个达到限额或失败时，会自动静默切换到下一个。</p>
                     </div>
                     <div>
-                      <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">?????</label>
-                      <input
-                        type="email"
-                        name="resend_from"
-                        value={settings.resend_from ?? ''}
-                        placeholder="noreply@yourdomain.com"
-                        class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
-                      />
+                      <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">发件人地址（与 Key 一一对应）</label>
+                      <textarea
+                        name="resend_froms"
+                        rows={Math.max(3, (settings.resend_accounts?.length || 1) + 1)}
+                        value={(settings.resend_accounts || []).map((a) => a.from).join('\n')}
+                        placeholder={'noreply@domain-a.com\nnoreply@domain-b.com'}
+                        class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition font-mono-custom text-sm"
+                      ></textarea>
+                      <p class="mt-1.5 text-xs text-slate-500">每行一个发件人，顺序需与上方 API Key 对应。不同 Key 可绑定不同发件域名。</p>
                     </div>
+                    {(settings.resend_accounts?.length > 0) && (
+                      <div class="rounded-md border border-slate-800 bg-slate-900/50 p-3">
+                        <div class="text-xs font-semibold text-slate-400 mb-2">当前已配置账号（按优先级）</div>
+                        <div class="space-y-1">
+                          {(settings.resend_accounts || []).map((a, idx) => (
+                            <div class="text-xs text-slate-300 font-mono-custom">
+                              #{idx + 1} ? {a.from} ? key ???{a.api_key.slice(-4)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
+
                 </div>
               </div>
-
             </div>
 
             <div class="flex justify-end pt-4">

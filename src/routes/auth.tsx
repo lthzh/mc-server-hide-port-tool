@@ -339,7 +339,7 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Bindings }>) {
     }
 
   // 启用 Resend 时走验证码流程
-    if (settings.resend_enabled && settings.resend_api_key && settings.resend_from) {
+    if (settings.resend_enabled && settings.resend_accounts.length > 0) {
       const code = String(Math.floor(100000 + Math.random() * 900000))
       const codeHash = await hashPassword(code)
       const expires_at = Date.now() + 10 * 60 * 1000
