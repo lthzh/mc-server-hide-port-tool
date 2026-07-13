@@ -50,7 +50,7 @@ export const IndexView: FC<{ name: string; email: string; role: string; records:
 
             <div
               id="user-menu-panel"
-              class="hidden absolute right-0 mt-2 w-52 rounded-xl border border-slate-800 bg-slate-950/95 backdrop-blur shadow-2xl shadow-black/40 overflow-hidden z-20"
+              class="hidden absolute right-0 mt-2 w-52 rounded-xl border border-slate-800 bg-slate-950/95 backdrop-blur shadow-2xl shadow-black/40 overflow-hidden z-20 p-0"
               role="menu"
             >
               <div class="px-3 py-2 border-b border-slate-800">
@@ -81,11 +81,11 @@ export const IndexView: FC<{ name: string; email: string; role: string; records:
                   管理后台
                 </a>
               )}
-              <form method="post" action="/logout" class="border-t border-slate-800">
+              <form method="post" action="/logout" class="m-0 p-0 border-t border-slate-800 leading-none block">
                 <input type="hidden" name="csrf_token" value={csrfToken} />
                 <button
                   type="submit"
-                  class="w-full flex items-center gap-2 px-3 py-2.5 text-left text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 transition"
+                  class="w-full m-0 flex items-center gap-2 px-3 py-2.5 text-left text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 transition leading-none"
                   role="menuitem"
                 >
                   退出登录
@@ -146,11 +146,11 @@ export const IndexView: FC<{ name: string; email: string; role: string; records:
 
               <div>
                 <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">端口</label>
-                <input 
-                  type="number" 
-                  id="port" 
-                  placeholder="端口" 
-                  value="25565" 
+                <input
+                  type="number"
+                  id="port"
+                  placeholder="例如 25565"
+                  value=""
                   class="w-full px-4 py-3 bg-slate-950/60 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition font-mono-custom"
                 />
               </div>
