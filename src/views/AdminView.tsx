@@ -71,15 +71,33 @@ export const AdminView: FC<{
     <div class="min-h-screen bg-slate-950 flex flex-col md:flex-row text-slate-100">
       
       {/* Left Sidebar */}
-      <aside class="w-full md:w-64 bg-slate-900 border-r border-slate-800 flex-shrink-0 flex flex-col sticky top-0 md:h-screen z-20">
-        <div class="p-6">
-          <div class="flex items-center gap-3 mb-8">
-            <div class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold font-mono-custom text-base">
+      <aside class="w-full md:w-64 bg-slate-900 border-b md:border-b-0 md:border-r border-slate-800 flex-shrink-0 relative md:sticky md:top-0 md:h-screen z-20">
+        <div class="flex items-center justify-between gap-3 px-4 py-3 md:px-6 md:py-6">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold font-mono-custom text-base shrink-0">
               A
             </div>
-            <span class="font-bold text-white tracking-wide">管理员后台</span>
+            <span class="font-bold text-white tracking-wide truncate">管理员后台</span>
           </div>
+          <button
+            type="button"
+            id="admin-sidebar-toggle"
+            class="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-md border border-slate-700 bg-slate-950 text-slate-300 hover:text-white hover:border-slate-500 transition"
+            aria-controls="admin-sidebar-panel"
+            aria-expanded="false"
+            aria-label={'\u5c55\u5f00\u5bfc\u822a\u83dc\u5355'}
+          >
+            <svg id="admin-sidebar-icon-open" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+            <svg id="admin-sidebar-icon-close" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
 
+        <div id="admin-sidebar-panel" class="hidden md:flex flex-col md:h-[calc(100%-4.5rem)] border-t border-slate-800 md:border-t-0">
+          <div class="p-4 md:p-6 md:pt-0 flex-1">
           <nav class="space-y-1">
             <a href="/admin?tab=settings" class={tabClass('settings')}>
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -112,9 +130,9 @@ export const AdminView: FC<{
               DNS 记录
             </a>
           </nav>
-        </div>
-        
-        <div class="p-6 mt-auto border-t border-slate-800">
+          </div>
+
+        <div class="p-4 md:p-6 mt-auto border-t border-slate-800">
           <div class="flex flex-col gap-2">
             <a href="/" class="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -133,10 +151,11 @@ export const AdminView: FC<{
             </form>
           </div>
         </div>
+        </div>
       </aside>
 
       {/* Main Content Area */}
-      <main class="flex-grow p-6 md:p-10 max-w-6xl w-full mx-auto space-y-6">
+      <main class="flex-grow p-4 sm:p-6 md:p-10 max-w-6xl w-full mx-auto space-y-6 min-w-0">
         
         {/* Settings Tab */}
         {tab === 'settings' && (
@@ -489,7 +508,7 @@ export const AdminView: FC<{
             ) : (
               oauthProviders.map((p) => (
                 <div class="bg-slate-950 border border-slate-800 rounded-lg overflow-hidden">
-                  <div class="flex flex-wrap items-center justify-between p-4 gap-4">
+                  <div class="flex flex-wrap items-center justify-between p-4 gap-3">
                     <div class="flex items-center gap-4">
                       {p.icon_url ? (
                         <img src={p.icon_url} alt="" class="w-10 h-10 object-contain rounded-full bg-slate-900 border border-slate-800/50 p-1" />
@@ -508,8 +527,8 @@ export const AdminView: FC<{
                         <div class="text-xs text-slate-500 font-mono-custom mt-1">{p.provider_id}</div>
                       </div>
                     </div>
-                    <div class="flex items-center gap-2">
-                      <form method="post" action={`/admin/oauth/${p.id}/toggle`}>
+                    <div class="flex items-center gap-2 flex-nowrap shrink-0">
+                      <form method="post" action={`/admin/oauth/${p.id}/toggle`} class="inline-flex m-0">
                 {csrfField}
 
                         <input type="hidden" name="enabled" value={p.enabled ? '0' : '1'} />
@@ -517,13 +536,13 @@ export const AdminView: FC<{
                           {p.enabled ? '禁用' : '启用'}
                         </button>
                       </form>
-                      <button type="button" class="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-md transition" onclick={`document.getElementById('edit-oauth-${p.id}').classList.toggle('hidden')`}>
+                      <button type="button" class="inline-flex items-center px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-md transition" onclick={`document.getElementById('edit-oauth-${p.id}').classList.toggle('hidden')`}>
                         编辑
                       </button>
-                      <form method="post" action={`/admin/oauth/${p.id}/delete`} onsubmit="return confirm('确认删除该 OAuth 应用？');">
+                      <form method="post" action={`/admin/oauth/${p.id}/delete`} class="inline-flex m-0" onsubmit="return confirm('确认删除该 OAuth 应用？');">
                 {csrfField}
 
-                        <button type="submit" class="px-3 py-1.5 text-xs bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 border border-rose-900/30 rounded-md transition">删除</button>
+                        <button type="submit" class="inline-flex items-center px-3 py-1.5 text-xs bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 border border-rose-900/30 rounded-md transition">删除</button>
                       </form>
                     </div>
                   </div>

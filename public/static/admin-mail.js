@@ -192,3 +192,45 @@
     openAccounts: openAccounts
   };
 })();
+
+(function () {
+  var toggle = document.getElementById('admin-sidebar-toggle');
+  var panel = document.getElementById('admin-sidebar-panel');
+  var iconOpen = document.getElementById('admin-sidebar-icon-open');
+  var iconClose = document.getElementById('admin-sidebar-icon-close');
+  if (!toggle || !panel) return;
+
+  function setOpen(open) {
+    if (open) {
+      panel.classList.remove('hidden');
+      panel.classList.add('flex');
+    } else {
+      panel.classList.add('hidden');
+      panel.classList.remove('flex');
+    }
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (iconOpen) iconOpen.classList.toggle('hidden', open);
+    if (iconClose) iconClose.classList.toggle('hidden', !open);
+  }
+
+  // Mobile: collapsed by default. Desktop CSS keeps it visible.
+  setOpen(false);
+
+  toggle.addEventListener('click', function () {
+    var open = toggle.getAttribute('aria-expanded') === 'true';
+    setOpen(!open);
+  });
+
+  window.addEventListener('resize', function () {
+    if (window.matchMedia('(min-width: 768px)').matches) {
+      // Ensure desktop always shows the panel.
+      panel.classList.remove('hidden');
+      panel.classList.add('flex');
+      toggle.setAttribute('aria-expanded', 'false');
+      if (iconOpen) iconOpen.classList.remove('hidden');
+      if (iconClose) iconClose.classList.add('hidden');
+    } else if (toggle.getAttribute('aria-expanded') !== 'true') {
+      setOpen(false);
+    }
+  });
+})();
