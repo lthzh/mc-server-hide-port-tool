@@ -15,14 +15,6 @@
     document.body.style.overflow = '';
   }
 
-  var mailModal = $('mail-test-modal');
-  var accountsModal = $('resend-accounts-modal');
-  var listEl = $('resend-accounts-list');
-  var hiddenFroms = $('resend-account-froms');
-  var hiddenKeys = $('resend-account-keys');
-  var primaryFrom = $('resend-primary-from');
-  var primaryKey = $('resend-primary-key');
-  var mailInput = $('mail-test-to');
   var KEEP = '__KEEP__';
 
   function splitLines(v) {
@@ -30,6 +22,10 @@
   }
 
   function readAccountsFromHidden() {
+    var hiddenFroms = $('resend-account-froms');
+    var hiddenKeys = $('resend-account-keys');
+    var primaryFrom = $('resend-primary-from');
+    var primaryKey = $('resend-primary-key');
     var froms = splitLines(hiddenFroms ? hiddenFroms.value : '');
     var keys = splitLines(hiddenKeys ? hiddenKeys.value : '');
     var rows = [];
@@ -54,6 +50,7 @@
   }
 
   function collectAccounts() {
+    var listEl = $('resend-accounts-list');
     if (!listEl) return [];
     var fromInputs = listEl.querySelectorAll('[data-from]');
     var keyInputs = listEl.querySelectorAll('[data-key]');
@@ -72,6 +69,7 @@
   }
 
   function renderAccounts(rows) {
+    var listEl = $('resend-accounts-list');
     if (!listEl) return;
     listEl.innerHTML = '';
     rows.forEach(function (row, idx) {
@@ -107,6 +105,8 @@
 
   function openMailTest(e) {
     if (e) e.preventDefault();
+    var mailModal = $('mail-test-modal');
+    var mailInput = $('mail-test-to');
     openModal(mailModal);
     if (mailInput) {
       setTimeout(function () {
@@ -118,11 +118,15 @@
   function openAccounts(e) {
     if (e) e.preventDefault();
     renderAccounts(readAccountsFromHidden());
-    openModal(accountsModal);
+    openModal($('resend-accounts-modal'));
   }
 
   function applyAccounts(e) {
     if (e) e.preventDefault();
+    var hiddenFroms = $('resend-account-froms');
+    var hiddenKeys = $('resend-account-keys');
+    var primaryFrom = $('resend-primary-from');
+    var primaryKey = $('resend-primary-key');
     var rows = collectAccounts().filter(function (r) {
       return r.from || r.key || r.keep;
     });
@@ -143,94 +147,116 @@
         ? '已配置（留空则不更新）'
         : 're_xxxxxxxx';
     }
-    closeModal(accountsModal);
+    closeModal($('resend-accounts-modal'));
   }
 
-  document.addEventListener('click', function (e) {
-    var target = e.target;
-    if (!(target instanceof Element)) return;
+  // Bind once with live DOM lookups so client-rendered admin pages work.
+  if (!window.__adminMailBound) {
+    window.__adminMailBound = true;
+    document.addEventListener('click', function (e) {
+      var target = e.target;
+      if (!(target instanceof Element)) return;
 
-    if (target.closest('#mail-test-open')) {
-      openMailTest(e);
-      return;
-    }
-    if (target.closest('#resend-accounts-open')) {
-      openAccounts(e);
-      return;
-    }
-    if (target.closest('#resend-account-add')) {
-      e.preventDefault();
-      var rows = collectAccounts();
-      rows.push({ from: '', key: '', keep: false });
-      renderAccounts(rows);
-      return;
-    }
-    if (target.closest('#resend-accounts-apply')) {
-      applyAccounts(e);
-      return;
-    }
-    if (target.closest('#mail-test-backdrop') || target.closest('#mail-test-close') || target.closest('#mail-test-cancel')) {
-      e.preventDefault();
-      closeModal(mailModal);
-      return;
-    }
-    if (target.closest('#resend-accounts-backdrop') || target.closest('#resend-accounts-close') || target.closest('#resend-accounts-cancel')) {
-      e.preventDefault();
-      closeModal(accountsModal);
-      return;
-    }
-  });
+      if (target.closest('#mail-test-open')) {
+        openMailTest(e);
+        return;
+      }
+      if (target.closest('#resend-accounts-open')) {
+        openAccounts(e);
+        return;
+      }
+      if (target.closest('#resend-account-add')) {
+        e.preventDefault();
+        var rows = collectAccounts();
+        rows.push({ from: '', key: '', keep: false });
+        renderAccounts(rows);
+        return;
+      }
+      if (target.closest('#resend-accounts-apply')) {
+        applyAccounts(e);
+        return;
+      }
+      if (target.closest('#mail-test-backdrop') || target.closest('#mail-test-close') || target.closest('#mail-test-cancel')) {
+        e.preventDefault();
+        closeModal($('mail-test-modal'));
+        return;
+      }
+      if (target.closest('#resend-accounts-backdrop') || target.closest('#resend-accounts-close') || target.closest('#resend-accounts-cancel')) {
+        e.preventDefault();
+        closeModal($('resend-accounts-modal'));
+        return;
+      }
+    });
 
-  document.addEventListener('keydown', function (e) {
-    if (e.key !== 'Escape') return;
-    if (mailModal && !mailModal.classList.contains('hidden')) closeModal(mailModal);
-    if (accountsModal && !accountsModal.classList.contains('hidden')) closeModal(accountsModal);
-  });
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      var mailModal = $('mail-test-modal');
+      var accountsModal = $('resend-accounts-modal');
+      if (mailModal && !mailModal.classList.contains('hidden')) closeModal(mailModal);
+      if (accountsModal && !accountsModal.classList.contains('hidden')) closeModal(accountsModal);
+    });
+  }
 
   window.__adminMail = {
     openMailTest: openMailTest,
-    openAccounts: openAccounts
+    openAccounts: openAccounts,
+    refresh: function () {
+      // no-op hook for re-render compatibility
+    }
   };
 })();
 
 (function () {
-  var toggle = document.getElementById('admin-sidebar-toggle');
-  var panel = document.getElementById('admin-sidebar-panel');
-  var iconOpen = document.getElementById('admin-sidebar-icon-open');
-  var iconClose = document.getElementById('admin-sidebar-icon-close');
-  if (!toggle || !panel) return;
+  function initSidebar() {
+    var toggle = document.getElementById('admin-sidebar-toggle');
+    var panel = document.getElementById('admin-sidebar-panel');
+    var iconOpen = document.getElementById('admin-sidebar-icon-open');
+    var iconClose = document.getElementById('admin-sidebar-icon-close');
+    if (!toggle || !panel) return false;
+    if (toggle.dataset.bound === '1') return true;
+    toggle.dataset.bound = '1';
 
-  function setOpen(open) {
-    if (open) {
-      panel.classList.remove('hidden');
-      panel.classList.add('flex');
-    } else {
-      panel.classList.add('hidden');
-      panel.classList.remove('flex');
+    function setOpen(open) {
+      if (open) {
+        panel.classList.remove('hidden');
+        panel.classList.add('flex');
+      } else {
+        panel.classList.add('hidden');
+        panel.classList.remove('flex');
+      }
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (iconOpen) iconOpen.classList.toggle('hidden', open);
+      if (iconClose) iconClose.classList.toggle('hidden', !open);
     }
-    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (iconOpen) iconOpen.classList.toggle('hidden', open);
-    if (iconClose) iconClose.classList.toggle('hidden', !open);
+
+    // Mobile: collapsed by default. Desktop CSS keeps it visible.
+    setOpen(false);
+
+    toggle.addEventListener('click', function () {
+      var open = toggle.getAttribute('aria-expanded') === 'true';
+      setOpen(!open);
+    });
+
+    window.addEventListener('resize', function () {
+      if (window.matchMedia('(min-width: 768px)').matches) {
+        panel.classList.remove('hidden');
+        panel.classList.add('flex');
+        toggle.setAttribute('aria-expanded', 'false');
+        if (iconOpen) iconOpen.classList.remove('hidden');
+        if (iconClose) iconClose.classList.add('hidden');
+      } else if (toggle.getAttribute('aria-expanded') !== 'true') {
+        setOpen(false);
+      }
+    });
+    return true;
   }
 
-  // Mobile: collapsed by default. Desktop CSS keeps it visible.
-  setOpen(false);
-
-  toggle.addEventListener('click', function () {
-    var open = toggle.getAttribute('aria-expanded') === 'true';
-    setOpen(!open);
-  });
-
-  window.addEventListener('resize', function () {
-    if (window.matchMedia('(min-width: 768px)').matches) {
-      // Ensure desktop always shows the panel.
-      panel.classList.remove('hidden');
-      panel.classList.add('flex');
-      toggle.setAttribute('aria-expanded', 'false');
-      if (iconOpen) iconOpen.classList.remove('hidden');
-      if (iconClose) iconClose.classList.add('hidden');
-    } else if (toggle.getAttribute('aria-expanded') !== 'true') {
-      setOpen(false);
-    }
-  });
+  // Admin DOM is client-rendered; retry until sidebar exists.
+  if (!initSidebar()) {
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries += 1;
+      if (initSidebar() || tries > 40) clearInterval(timer);
+    }, 100);
+  }
 })();

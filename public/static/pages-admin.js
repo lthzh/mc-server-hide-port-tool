@@ -511,33 +511,60 @@ function bindSidebar() {
   }
 }
 
-function bindMailHelpers() {
-  // Reuse existing admin-mail.js globals if present; otherwise simple modal open/close.
+function ensureAdminMailScript() {
+  // admin-mail.js uses document-level click delegation and live DOM lookups.
   if (window.__adminMail) return;
-  const open = (id) => { const m = document.getElementById(id); if (m) { m.classList.remove('hidden'); document.body.style.overflow = 'hidden'; } };
-  const close = (id) => { const m = document.getElementById(id); if (m) { m.classList.add('hidden'); document.body.style.overflow = ''; } };
-  document.getElementById('mail-test-open')?.addEventListener('click', (e) => { e.preventDefault(); open('mail-test-modal'); });
-  document.getElementById('resend-accounts-open')?.addEventListener('click', (e) => { e.preventDefault(); open('resend-accounts-modal'); });
-  ['mail-test-close','mail-test-cancel','mail-test-backdrop'].forEach((id) => document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); close('mail-test-modal'); }));
-  ['resend-accounts-close','resend-accounts-cancel','resend-accounts-backdrop'].forEach((id) => document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); close('resend-accounts-modal'); }));
+  if (document.querySelector('script[data-admin-mail], script[src="/static/admin-mail.js"]')) return;
+  const s = document.createElement('script');
+  s.src = '/static/admin-mail.js';
+  s.defer = true;
+  s.dataset.adminMail = '1';
+  document.body.appendChild(s);
+}
+
+function bindMailHelpers() {
+  // Fallback only when admin-mail.js is not present yet.
+  if (window.__adminMail) return;
+  const open = (id) => {
+    const m = document.getElementById(id);
+    if (m) {
+      m.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+  };
+  const close = (id) => {
+    const m = document.getElementById(id);
+    if (m) {
+      m.classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+  };
+  document.getElementById('mail-test-open')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    open('mail-test-modal');
+  });
+  document.getElementById('resend-accounts-open')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    open('resend-accounts-modal');
+  });
+  ['mail-test-close', 'mail-test-cancel', 'mail-test-backdrop'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('click', (e) => {
+      e.preventDefault();
+      close('mail-test-modal');
+    });
+  });
+  ['resend-accounts-close', 'resend-accounts-cancel', 'resend-accounts-backdrop'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('click', (e) => {
+      e.preventDefault();
+      close('resend-accounts-modal');
+    });
+  });
 }
 
 function bindEvents() {
   bindSidebar();
+  ensureAdminMailScript();
   bindMailHelpers();
-  // ensure admin-mail script hooks after DOM ready
-  if (window.__adminMail) {
-    // already available
-  } else {
-    // dynamically load classic admin-mail.js once
-    if (!document.querySelector('script[data-admin-mail]')) {
-      const s = document.createElement('script');
-      s.src = '/static/admin-mail.js';
-      s.defer = true;
-      s.dataset.adminMail = '1';
-      document.body.appendChild(s);
-    }
-  }
 
   document.getElementById('admin-settings-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
