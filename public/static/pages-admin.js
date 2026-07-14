@@ -303,10 +303,37 @@ function renderUsersTab(data) {
   const s = data.settings || {};
   const currentUserId = data.currentUserId;
   const isSuper = !!data.currentUserSuperAdmin;
+  const query = data.usersQuery || { q: '', role: 'all' };
+  const q = query.q || '';
+  const role = query.role || 'all';
   return `
   <section class="bg-slate-900/40 border border-slate-800 rounded-lg p-6 sm:p-8">
-    <div class="flex items-center justify-between mb-6 pb-3 border-b border-slate-800"><h3 class="text-lg font-bold text-white">用户管理 (${users.length})</h3></div>
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-3 border-b border-slate-800">
+      <h3 class="text-lg font-bold text-white">用户管理 (${users.length})</h3>
+      <p class="text-xs text-slate-500">邮箱已脱敏显示；搜索时请输入完整邮箱，后端按明文匹配后返回脱敏结果。</p>
+    </div>
     <div id="users-alert">${alertBox('error', data.createError)}</div>
+
+    <form id="user-search-form" class="mb-6 p-4 bg-slate-950 rounded-lg border border-slate-800 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+      <div class="md:col-span-2">
+        <label class="block text-xs font-semibold text-slate-500 mb-1">搜索</label>
+        <input type="text" name="q" value="${escapeAttr(q)}" placeholder="完整邮箱 / 用户名 / 用户 ID" class="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-md text-white text-sm font-mono-custom" />
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-500 mb-1">角色筛选</label>
+        <select name="role" class="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-md text-white text-sm">
+          <option value="all" ${role === 'all' ? 'selected' : ''}>全部</option>
+          <option value="user" ${role === 'user' ? 'selected' : ''}>普通用户</option>
+          <option value="admin" ${role === 'admin' ? 'selected' : ''}>管理员</option>
+          <option value="super" ${role === 'super' ? 'selected' : ''}>超级管理员</option>
+        </select>
+      </div>
+      <div class="flex gap-2">
+        <button type="submit" class="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-md transition">搜索</button>
+        <button type="button" id="user-search-reset" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm rounded-md border border-slate-700 transition">重置</button>
+      </div>
+    </form>
+
     <div class="mb-8 p-5 bg-slate-950 rounded-lg border border-slate-800">
       <h4 class="text-sm font-bold text-white mb-4">手动创建用户</h4>
       <form id="user-create-form" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
@@ -329,17 +356,18 @@ function renderUsersTab(data) {
         <table class="w-full text-sm text-left border-collapse">
           <thead class="bg-slate-900/50">
             <tr class="border-b border-slate-800 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-              <th class="py-3 px-4">用户名</th><th class="py-3 px-4">注册邮箱</th><th class="py-3 px-4">角色</th><th class="py-3 px-4">记录上限</th><th class="py-3 px-4">注册时间</th><th class="py-3 px-4 text-right">操作</th>
+              <th class="py-3 px-4">用户名</th><th class="py-3 px-4">注册邮箱（脱敏）</th><th class="py-3 px-4">角色</th><th class="py-3 px-4">记录上限</th><th class="py-3 px-4">注册时间</th><th class="py-3 px-4 text-right">操作</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-800/60">
-            ${users.map((u) => {
+            ${users.length === 0 ? '<tr><td colspan="6" class="py-10 text-center text-slate-500 text-sm">没有匹配的用户</td></tr>' : users.map((u) => {
               const isUserSuper = !!u.super_admin;
               const unlimited = isUserSuper || u.role === 'admin';
-              const e = formatEmailDisplay(u.email || '');
+              // Backend already force-masks email; do not re-expand or expose full address.
+              const email = u.email || '';
               return `<tr class="hover:bg-slate-900/40 transition">
                 <td class="py-3 px-4 text-white font-medium"><div class="flex items-center gap-2 flex-wrap"><span>${escapeHtml(u.name)}</span><span class="text-[10px] font-mono-custom text-slate-500">#${escapeHtml(u.id)}</span>${u.id === currentUserId ? '<span class="text-[10px] px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">你</span>' : ''}</div></td>
-                <td class="py-3 px-4 font-mono-custom text-slate-300 max-w-[14rem]"><div class="min-w-0"><div class="truncate text-xs" title="${escapeAttr(e.full)}">${escapeHtml(e.primary)}</div>${e.isSynthetic ? '<div class="text-[10px] text-slate-500 mt-0.5 bg-slate-800/50 inline-block px-1 rounded">OAuth 合成</div>' : ''}</div></td>
+                <td class="py-3 px-4 font-mono-custom text-slate-300 max-w-[14rem]"><div class="min-w-0"><div class="truncate text-xs" title="${escapeAttr(email)}">${escapeHtml(email)}</div></div></td>
                 <td class="py-3 px-4">${isUserSuper ? '<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">超管</span>' : u.role === 'admin' ? '<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">管理员</span>' : '<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">用户</span>'}</td>
                 <td class="py-3 px-4 font-mono-custom text-slate-300 text-xs">${unlimited ? '<span class="text-amber-400">∞</span>' : `<form data-user-limit="${escapeAttr(u.id)}" class="flex items-center gap-1"><input type="number" name="record_limit" min="0" value="${u.record_limit == null ? '' : escapeAttr(String(u.record_limit))}" placeholder="${escapeAttr(String(s.max_records_per_user || 0))}" class="w-16 px-2 py-1 bg-slate-900 border border-slate-800 rounded text-white text-[11px] font-mono-custom" /><button type="submit" class="px-1.5 py-1 text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded transition">修改</button></form>`}</td>
                 <td class="py-3 px-4 text-slate-400 text-[11px]">${escapeHtml(formatDate(u.createdAt))}</td>
@@ -405,10 +433,28 @@ function setTab(tab) {
 }
 
 async function loadAdmin(tab, flash = {}) {
-  const { res, data } = await apiGet(`/api/pages/admin?tab=${encodeURIComponent(tab || 'settings')}`);
+  const active = tab || (state && state.activeTab) || 'settings';
+  const params = new URLSearchParams();
+  params.set('tab', active);
+  if (active === 'users') {
+    const q = (flash.usersQuery && flash.usersQuery.q != null)
+      ? flash.usersQuery.q
+      : (state && state.usersQuery && state.usersQuery.q) || '';
+    const role = (flash.usersQuery && flash.usersQuery.role)
+      ? flash.usersQuery.role
+      : (state && state.usersQuery && state.usersQuery.role) || 'all';
+    if (q) params.set('q', q);
+    if (role && role !== 'all') params.set('role', role);
+  }
+  const { res, data } = await apiGet(`/api/pages/admin?${params.toString()}`);
   if (data?.redirect) { window.location.href = data.redirect; return; }
   if (!res.ok || !data?.success) { showAppError(apiMessage(data, '管理后台加载失败')); return; }
-  state = { ...data.data, ...flash, activeTab: tab || data.data.activeTab || 'settings' };
+  state = {
+    ...data.data,
+    ...flash,
+    activeTab: active || data.data.activeTab || 'settings',
+    usersQuery: data.data.usersQuery || flash.usersQuery || { q: '', role: 'all' }
+  };
   renderAll();
 }
 
@@ -601,6 +647,19 @@ function bindEvents() {
     await loadAdmin('invites', data?.success ? { inviteInfo: data.message || '已作废' } : { inviteError: apiMessage(data, '操作失败') });
   }));
 
+  document.getElementById('user-search-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const obj = formToObject(e.currentTarget);
+    await loadAdmin('users', {
+      usersQuery: {
+        q: String(obj.q || '').trim(),
+        role: String(obj.role || 'all')
+      }
+    });
+  });
+  document.getElementById('user-search-reset')?.addEventListener('click', async () => {
+    await loadAdmin('users', { usersQuery: { q: '', role: 'all' } });
+  });
   document.getElementById('user-create-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const obj = formToObject(e.currentTarget);

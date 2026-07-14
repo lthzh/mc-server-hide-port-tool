@@ -121,6 +121,49 @@ export async function listAllUsers(db: D1Database): Promise<UserListRow[]> {
   return r.results ?? []
 }
 
+export type UserSearchRole = 'all' | 'user' | 'admin' | 'super'
+
+export type UserSearchOptions = {
+  q?: string
+  role?: UserSearchRole
+}
+
+/** Search users by plaintext email/name/id; role filter is applied in SQL. */
+export async function searchUsers(
+  db: D1Database,
+  opts: UserSearchOptions = {}
+): Promise<UserListRow[]> {
+  const q = String(opts.q ?? '').trim()
+  const role = opts.role ?? 'all'
+
+  const where: string[] = []
+  const binds: unknown[] = []
+
+  if (role === 'user') {
+    where.push("(COALESCE(role, 'user') = 'user' AND COALESCE(super_admin, 0) = 0)")
+  } else if (role === 'admin') {
+    where.push("(role = 'admin' AND COALESCE(super_admin, 0) = 0)")
+  } else if (role === 'super') {
+    where.push('COALESCE(super_admin, 0) > 0')
+  }
+
+  if (q) {
+    // Email is stored in plaintext; search against DB then mask on the way out.
+    where.push('(email = ? OR lower(email) LIKE ? OR lower(name) LIKE ? OR id = ? OR id LIKE ?)')
+    const like = '%' + q.toLowerCase() + '%'
+    binds.push(q, like, like, q, like)
+  }
+
+  const sql =
+    'SELECT id, name, email, emailVerified, role, super_admin, record_limit, createdAt FROM user' +
+    (where.length ? ' WHERE ' + where.join(' AND ') : '') +
+    ' ORDER BY "createdAt" ASC'
+
+  const stmt = db.prepare(sql)
+  const r = binds.length ? await stmt.bind(...binds).all<UserListRow>() : await stmt.all<UserListRow>()
+  return r.results ?? []
+}
+
 export type UserListRow = {
   id: string
   name: string

@@ -3,7 +3,8 @@ import { getCurrentUser, isSuperAdminUser, requireAdmin } from '../auth'
 import { pageShellResponse } from '../lib/page-shell'
 import { apiErr, apiOk, maskSettingsForAdmin, publicSettings } from '../lib/api'
 import { safeInternalPath } from '../lib/security'
-import { countUsers, listAllRecords, listAllUsers, listRecordsByUser } from '../services/dns-records'
+import { countUsers, listAllRecords, listRecordsByUser, searchUsers, type UserSearchRole } from '../services/dns-records'
+import { maskUsersForAdmin } from '../lib/privacy'
 import { listInviteCodes } from '../services/invite-codes'
 import { listOAuthProviders, listPublicOAuthProviders, OAUTH_TEMPLATES } from '../services/oauth-providers'
 import { getSettings } from '../services/settings'
@@ -201,8 +202,13 @@ export function registerPageRoutes(app: Hono<{ Bindings: Bindings }>) {
     const user = await requireAdmin(c.env, c.req.raw.headers)
     if (!user) return apiErr(c, '无权限', 403, { redirect: '/' })
     const activeTab = parseAdminTab(c.req.query('tab'))
+    const q = String(c.req.query('q') ?? '').trim()
+    const roleRaw = String(c.req.query('role') ?? 'all').trim().toLowerCase()
+    const role: UserSearchRole =
+      roleRaw === 'user' || roleRaw === 'admin' || roleRaw === 'super' ? roleRaw : 'all'
+
     const [users, records, settings, inviteCodes, oauthProviders] = await Promise.all([
-      listAllUsers(c.env.DB),
+      searchUsers(c.env.DB, { q, role }),
       listAllRecords(c.env.DB),
       getSettings(c.env.DB),
       listInviteCodes(c.env.DB),
@@ -210,7 +216,8 @@ export function registerPageRoutes(app: Hono<{ Bindings: Bindings }>) {
     ])
     return apiOk(c, {
       activeTab,
-      users,
+      users: maskUsersForAdmin(users),
+      usersQuery: { q, role },
       records,
       settings: maskSettingsForAdmin(settings),
       inviteCodes,

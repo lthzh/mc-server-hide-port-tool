@@ -9,6 +9,8 @@ import {
   isSuperAdmin,
   listAllUsers,
   listRecordsByUser,
+  searchUsers,
+  type UserSearchRole,
   setUserRecordLimit,
   setUserRole
 } from '../services/dns-records'
@@ -31,6 +33,7 @@ import {
   readJsonBody,
   requireJsonMutation
 } from '../lib/api'
+import { maskUsersForAdmin } from '../lib/privacy'
 
 function asBool(v: unknown): boolean {
   if (typeof v === 'boolean') return v
@@ -115,6 +118,25 @@ export function registerAdminRoutes(app: Hono<{ Bindings: Bindings }>) {
 
     await updateSettings(c.env.DB, patch)
     return apiOk(c, undefined, { message: "设置已保存" })
+  })
+
+
+  app.get('/api/admin/users', async (c) => {
+    const admin = await requireAdmin(c.env, c.req.raw.headers)
+    if (!admin) return apiErr(c, "无权限", 403)
+
+    const q = String(c.req.query('q') ?? '').trim()
+    const roleRaw = String(c.req.query('role') ?? 'all').trim().toLowerCase()
+    const role: UserSearchRole =
+      roleRaw === 'user' || roleRaw === 'admin' || roleRaw === 'super' ? roleRaw : 'all'
+
+    // Search plaintext in DB, then force-mask email before returning to admin UI.
+    const users = await searchUsers(c.env.DB, { q, role })
+    return apiOk(c, {
+      users: maskUsersForAdmin(users),
+      query: { q, role },
+      total: users.length
+    })
   })
 
   app.post('/api/admin/users/:id/role', async (c) => {
