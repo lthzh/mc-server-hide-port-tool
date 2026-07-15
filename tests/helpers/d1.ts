@@ -5,7 +5,37 @@ import { unstable_splitSqlQuery } from 'wrangler'
 
 export type TestD1 = { db: D1Database; dispose: () => Promise<void> }
 
-export async function createTestD1(): Promise<TestD1> {
+export type MigrationOptions = { through?: string }
+
+export async function applyMigrationFile(db: D1Database, file: string): Promise<void> {
+  const path = resolve(process.cwd(), 'migrations', file)
+  const sql = (await readFile(path, 'utf8')).replace(/\r\n/g, '\n')
+  const statements = unstable_splitSqlQuery(sql)
+  if (statements.length > 0) {
+    await db.batch(statements.map((statement) => db.prepare(statement)))
+  }
+}
+
+export async function applyMigrations(
+  db: D1Database,
+  options: MigrationOptions = {}
+): Promise<void> {
+  const dir = resolve(process.cwd(), 'migrations')
+  const files = (await readdir(dir))
+    .filter((name) => /^\d{4}_.+\.sql$/.test(name))
+    .sort()
+  if (options.through && !files.includes(options.through)) {
+    throw new Error('Unknown migration: ' + options.through)
+  }
+  const selected = options.through
+    ? files.slice(0, files.indexOf(options.through) + 1)
+    : files
+  for (const file of selected) {
+    await applyMigrationFile(db, file)
+  }
+}
+
+export async function createTestD1(options: MigrationOptions = {}): Promise<TestD1> {
   const mf = new Miniflare({
     modules: true,
     script: 'export default { fetch() { return new Response("ok") } }',
@@ -14,17 +44,7 @@ export async function createTestD1(): Promise<TestD1> {
     d1Databases: { DB: crypto.randomUUID() }
   })
   const db = await mf.getD1Database('DB')
-  const dir = resolve(process.cwd(), 'migrations')
-  const files = (await readdir(dir))
-    .filter((name) => /^\d{4}_.+\.sql$/.test(name))
-    .sort()
-  for (const file of files) {
-    const sql = (await readFile(resolve(dir, file), 'utf8')).replace(/\r\n/g, '\n')
-    const statements = unstable_splitSqlQuery(sql)
-    if (statements.length > 0) {
-      await db.batch(statements.map((statement) => db.prepare(statement)))
-    }
-  }
+  await applyMigrations(db, options)
   return { db, dispose: async () => mf.dispose() }
 }
 
