@@ -109,11 +109,6 @@ export async function deleteRecordRow(db: D1Database, id: string): Promise<void>
   await db.prepare('DELETE FROM dns_record WHERE id = ?').bind(id).run()
 }
 
-export async function countUsers(db: D1Database): Promise<number> {
-  const r = await db.prepare('SELECT COUNT(*) as n FROM user').first<{ n: number }>()
-  return r?.n ?? 0
-}
-
 export async function listAllUsers(db: D1Database): Promise<UserListRow[]> {
   const r = await db
     .prepare('SELECT id, name, email, emailVerified, role, super_admin, record_limit, createdAt FROM user ORDER BY "createdAt" ASC')
@@ -199,17 +194,6 @@ export async function setUserRecordLimit(
   await db
     .prepare('UPDATE user SET record_limit = ? WHERE id = ?')
     .bind(value, id)
-    .run()
-}
-
-export async function setSuperAdmin(
-  db: D1Database,
-  id: string,
-  superAdmin: boolean
-): Promise<void> {
-  await db
-    .prepare('UPDATE user SET super_admin = ? WHERE id = ?')
-    .bind(superAdmin ? 1 : 0, id)
     .run()
 }
 

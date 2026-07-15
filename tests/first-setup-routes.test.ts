@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { hashPassword } from 'better-auth/crypto'
 import app from '../src/index'
+import { createAuth } from '../src/auth'
 import type { Bindings } from '../src/services/cloudflare-dns'
 import { updateSettings } from '../src/services/settings'
 import {
@@ -9,6 +10,10 @@ import {
   getFirstSetupState
 } from '../src/services/first-setup'
 import {
+  bindOAuthRegistrationIntentState,
+  createOAuthRegistrationIntent
+} from '../src/services/oauth-registration-intents'
+import {
   createTestD1,
   markFirstSetupCompleted,
   seedUser,
@@ -16,7 +21,12 @@ import {
 } from './helpers/d1'
 import {
   AUTH_ORIGIN,
-  sameOriginJsonHeaders
+  cookiesFromHeaders,
+  FIXTURE_PROVIDER_ID,
+  mergeCookieHeaders,
+  mockOAuthProviderFetch,
+  sameOriginJsonHeaders,
+  seedFixtureOAuthProvider
 } from './helpers/auth'
 
 const instances: TestD1[] = []
@@ -121,6 +131,92 @@ async function counts(db: D1Database) {
   }
 }
 
+async function enableRaceRegistration(db: D1Database): Promise<void> {
+  await updateSettings(db, {
+    registration_enabled: true,
+    registration_mode: 'both',
+    invite_required: false,
+    resend_enabled: false,
+    resend_accounts: []
+  })
+}
+
+async function expectOnlySetupAdministrator(db: D1Database): Promise<string> {
+  const users = await db.prepare(
+    'SELECT id, email, role, super_admin FROM user ORDER BY id'
+  ).all<{
+    id: string
+    email: string
+    role: string
+    super_admin: number
+  }>()
+  expect(users.results).toHaveLength(1)
+  expect(users.results[0]).toMatchObject({
+    email: validSetupBody.email,
+    role: 'admin',
+    super_admin: 1
+  })
+
+  const accounts = await db.prepare(
+    'SELECT providerId, userId FROM account ORDER BY providerId, userId'
+  ).all<{ providerId: string; userId: string }>()
+  expect(accounts.results).toEqual([{
+    providerId: 'credential',
+    userId: users.results[0]!.id
+  }])
+  expect(await getFirstSetupState(db)).toMatchObject({
+    status: 'completed',
+    claimedUserId: users.results[0]!.id
+  })
+  return users.results[0]!.id
+}
+
+async function prepareOAuthRegistrationCallback(db: D1Database, env: Bindings) {
+  await seedFixtureOAuthProvider(db)
+  const auth = await createAuth(env)
+  const started = await auth.api.signInWithOAuth2({
+    headers: sameOriginJsonHeaders(),
+    body: {
+      providerId: FIXTURE_PROVIDER_ID,
+      callbackURL: '/register/oauth/done',
+      errorCallbackURL: '/register/oauth/error',
+      disableRedirect: true,
+      requestSignUp: true
+    },
+    asResponse: true
+  })
+  expect(started.status).toBe(200)
+  const startedBody = await started.json() as { url: string }
+  const state = new URL(startedBody.url).searchParams.get('state') ?? ''
+  expect(state).not.toBe('')
+
+  const intent = await createOAuthRegistrationIntent(db, {
+    providerId: FIXTURE_PROVIDER_ID,
+    inviteRequired: false,
+    inviteCode: ''
+  })
+  await bindOAuthRegistrationIntentState(db, {
+    id: intent.id,
+    token: intent.token,
+    providerId: FIXTURE_PROVIDER_ID,
+    state
+  })
+  const cookies = mergeCookieHeaders(
+    cookiesFromHeaders(started.headers),
+    `oauth_registration_intent=${intent.token}`
+  )
+  const callbackUrl =
+    `${AUTH_ORIGIN}/api/auth/oauth2/callback/${FIXTURE_PROVIDER_ID}` +
+    `?code=test-code&state=${encodeURIComponent(state)}`
+
+  return {
+    intentId: intent.id,
+    request: () => app.request(callbackUrl, {
+      headers: { cookie: cookies }
+    }, env)
+  }
+}
+
 afterEach(async () => {
   vi.restoreAllMocks()
   await Promise.all(instances.splice(0).map(({ dispose }) => dispose()))
@@ -182,6 +278,68 @@ describe('first setup route', { timeout: 30_000 }, () => {
         'SELECT role, super_admin FROM user'
       ).first()).toEqual({ role: 'admin', super_admin: 1 })
       expect(await getFirstSetupState(db)).toMatchObject({ status: 'completed' })
+    }
+  })
+
+  it('keeps ordinary email registration from winning five setup races', async () => {
+    for (let round = 0; round < 5; round += 1) {
+      const { db, env } = await setupOpen()
+      await enableRaceRegistration(db)
+
+      const [setupResponse, registrationResponse] = await Promise.all([
+        postSetup(env),
+        postJson(env, '/api/auth/register', {
+          name: `Race Email ${round}`,
+          email: `race-email-${round}@example.test`,
+          password: 'password123',
+          invite_code: ''
+        })
+      ])
+
+      expect(setupResponse.status).toBe(200)
+      expect(registrationResponse.status).toBe(409)
+      expect(await jsonBody(registrationResponse)).toMatchObject({
+        success: false,
+        code: 'SETUP_NOT_READY'
+      })
+      await expectOnlySetupAdministrator(db)
+    }
+  })
+
+  it('keeps a prepared OAuth callback from winning five setup races', async () => {
+    for (let round = 0; round < 5; round += 1) {
+      const { db, env } = await setupOpen()
+      await enableRaceRegistration(db)
+      const callback = await prepareOAuthRegistrationCallback(db, env)
+      mockOAuthProviderFetch()
+
+      const [setupResponse, callbackResponse] = await Promise.all([
+        postSetup(env),
+        callback.request()
+      ])
+
+      expect(setupResponse.status).toBe(200)
+      expect(callbackResponse.status).toBe(302)
+      const setupUserId = await expectOnlySetupAdministrator(db)
+
+      const intent = await db.prepare(
+        `SELECT authorized_at, authorized_user_id, consumed_at
+         FROM oauth_registration_intent WHERE id = ?`
+      ).bind(callback.intentId).first<{
+        authorized_at: number | null
+        authorized_user_id: string | null
+        consumed_at: number | null
+      }>()
+      expect(intent).toEqual({
+        authorized_at: null,
+        authorized_user_id: null,
+        consumed_at: null
+      })
+      const sessions = await db.prepare(
+        'SELECT userId FROM session ORDER BY userId'
+      ).all<{ userId: string }>()
+      expect(sessions.results.every((row) => row.userId === setupUserId)).toBe(true)
+      vi.restoreAllMocks()
     }
   })
 
