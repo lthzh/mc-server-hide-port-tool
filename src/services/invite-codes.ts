@@ -1,4 +1,4 @@
-﻿export type InviteCodeRow = {
+export type InviteCodeRow = {
   id: string
   code: string
   created_by: string
@@ -6,6 +6,8 @@
   used_by: string | null
   used_at: number | null
   revoked: number
+  reserved_intent_id: string | null
+  reserved_at: number | null
   creator_name?: string | null
   creator_email?: string | null
   used_name?: string | null
@@ -45,7 +47,9 @@ export async function createInviteCode(
     created_at,
     used_by: null,
     used_at: null,
-    revoked: 0
+    revoked: 0,
+    reserved_intent_id: null,
+    reserved_at: null
   }
 }
 
@@ -60,6 +64,8 @@ export async function listInviteCodes(db: D1Database): Promise<InviteCodeRow[]> 
          i.used_by,
          i.used_at,
          i.revoked,
+         i.reserved_intent_id,
+         i.reserved_at,
          creator.name AS creator_name,
          creator.email AS creator_email,
          used.name AS used_name,
@@ -81,7 +87,8 @@ export async function findInviteCodeByValue(
   if (!normalized) return null
   return await db
     .prepare(
-      `SELECT id, code, created_by, created_at, used_by, used_at, revoked
+      `SELECT id, code, created_by, created_at, used_by, used_at, revoked,
+              reserved_intent_id, reserved_at
        FROM invite_code
        WHERE code = ?`
     )
@@ -103,6 +110,9 @@ export async function assertInviteCodeAvailable(
   if (invite.used_by) {
     return { ok: false, message: '邀请码已被使用' }
   }
+  if (invite.reserved_intent_id) {
+    return { ok: false, message: '邀请码正在使用中' }
+  }
   return { ok: true, invite }
 }
 
@@ -117,11 +127,18 @@ export async function consumeInviteCode(
     .prepare(
       `UPDATE invite_code
        SET used_by = ?, used_at = ?
-       WHERE id = ? AND used_by IS NULL AND revoked = 0`
+       WHERE id = ?
+         AND used_by IS NULL
+         AND revoked = 0
+         AND reserved_intent_id IS NULL`
     )
     .bind(userId, Date.now(), check.invite.id)
     .run()
   if (!result.success || (result.meta?.changes ?? 0) < 1) {
+    const latest = await findInviteCodeByValue(db, code)
+    if (latest?.reserved_intent_id) {
+      return { ok: false, message: '邀请码正在使用中' }
+    }
     return { ok: false, message: '邀请码已被使用或不可用' }
   }
   return { ok: true }
@@ -132,12 +149,47 @@ export async function revokeInviteCode(
   id: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const row = await db
-    .prepare('SELECT id, used_by, revoked FROM invite_code WHERE id = ?')
+    .prepare(
+      `SELECT id, used_by, revoked, reserved_intent_id
+       FROM invite_code WHERE id = ?`
+    )
     .bind(id)
-    .first<{ id: string; used_by: string | null; revoked: number }>()
+    .first<{
+      id: string
+      used_by: string | null
+      revoked: number
+      reserved_intent_id: string | null
+    }>()
   if (!row) return { ok: false, message: '邀请码不存在' }
   if (row.used_by) return { ok: false, message: '已使用的邀请码无法作废' }
   if (row.revoked) return { ok: true }
-  await db.prepare('UPDATE invite_code SET revoked = 1 WHERE id = ?').bind(id).run()
+  if (row.reserved_intent_id) {
+    return { ok: false, message: '邀请码正在使用中，暂时无法作废' }
+  }
+  const result = await db.prepare(
+    `UPDATE invite_code
+     SET revoked = 1
+     WHERE id = ?
+       AND used_by IS NULL
+       AND revoked = 0
+       AND reserved_intent_id IS NULL`
+  ).bind(id).run()
+  if (!result.success || (result.meta?.changes ?? 0) < 1) {
+    const latest = await db.prepare(
+      'SELECT used_by, revoked, reserved_intent_id FROM invite_code WHERE id = ?'
+    ).bind(id).first<{
+      used_by: string | null
+      revoked: number
+      reserved_intent_id: string | null
+    }>()
+    if (latest?.reserved_intent_id) {
+      return { ok: false, message: '邀请码正在使用中，暂时无法作废' }
+    }
+    if (latest?.used_by) {
+      return { ok: false, message: '已使用的邀请码无法作废' }
+    }
+    if (latest?.revoked) return { ok: true }
+    return { ok: false, message: '邀请码不存在' }
+  }
   return { ok: true }
 }

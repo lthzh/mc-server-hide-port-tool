@@ -1,5 +1,13 @@
 ﻿import { afterEach, describe, expect, it } from 'vitest'
 import { createTestD1, seedInvite, seedUser, type TestD1 } from './helpers/d1'
+import {
+  assertInviteCodeAvailable,
+  consumeInviteCode,
+  createInviteCode,
+  findInviteCodeByValue,
+  listInviteCodes,
+  revokeInviteCode
+} from '../src/services/invite-codes'
 
 const instances: TestD1[] = []
 
@@ -189,5 +197,53 @@ describe('0010 OAuth registration intent migration', () => {
     ).bind(authorizedInvite.id).first<{ reserved_intent_id: string | null }>()
     expect(pending?.reserved_intent_id).toBeNull()
     expect(authorized?.reserved_intent_id).toBe('intent-authorized-delete')
+  })
+})
+
+describe('reserved invite compatibility', () => {
+  it('blocks availability, ordinary consumption, and revocation while reserved', async () => {
+    const db = await database()
+    const creatorId = await seedUser(db)
+    const invite = await seedInvite(db, creatorId)
+    await db.prepare(
+      `UPDATE invite_code
+       SET reserved_intent_id = 'intent-active', reserved_at = ?
+       WHERE id = ?`
+    ).bind(Date.now(), invite.id).run()
+
+    await expect(assertInviteCodeAvailable(db, invite.code)).resolves.toEqual({
+      ok: false,
+      message: '邀请码正在使用中'
+    })
+    await expect(consumeInviteCode(db, invite.code, '9002')).resolves.toEqual({
+      ok: false,
+      message: '邀请码正在使用中'
+    })
+    await expect(revokeInviteCode(db, invite.id)).resolves.toEqual({
+      ok: false,
+      message: '邀请码正在使用中，暂时无法作废'
+    })
+  })
+
+  it('returns reservation fields from create, list, and find operations', async () => {
+    const db = await database()
+    const creatorId = await seedUser(db)
+    const created = await createInviteCode(db, creatorId, 'FRESH-INVITE')
+    expect(created).toMatchObject({
+      reserved_intent_id: null,
+      reserved_at: null
+    })
+
+    const found = await findInviteCodeByValue(db, created.code)
+    expect(found).toMatchObject({
+      reserved_intent_id: null,
+      reserved_at: null
+    })
+
+    const listed = await listInviteCodes(db)
+    expect(listed.find(({ id }) => id === created.id)).toMatchObject({
+      reserved_intent_id: null,
+      reserved_at: null
+    })
   })
 })
