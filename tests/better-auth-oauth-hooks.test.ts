@@ -33,6 +33,7 @@ async function setup(
 ) {
   const instance = await createTestD1()
   instances.push(instance)
+  await markFirstSetupCompleted(instance.db)
   await setRegistrationPolicy(instance.db, policy)
   await seedFixtureOAuthProvider(instance.db)
   const env: AuthBindings = {

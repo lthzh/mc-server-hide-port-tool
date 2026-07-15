@@ -1,4 +1,4 @@
-import { betterAuth } from 'better-auth'
+import { APIError, betterAuth } from 'better-auth'
 import { genericOAuth } from 'better-auth/plugins'
 import { passkey } from '@better-auth/passkey'
 import {
@@ -14,6 +14,13 @@ import {
   consumeAuthorizedOAuthRegistrationIntent,
   createOAuthRegistrationSecurityEvent
 } from './services/oauth-registration-intents'
+import {
+  assertFirstSetupClaimActive,
+  assertFirstSetupCompleted,
+  bindFirstSetupUser,
+  createFirstSetupSecurityEvent,
+  FirstSetupError
+} from './services/first-setup'
 
 export type AuthBindings = {
   DB: D1Database
@@ -24,8 +31,18 @@ export type AuthBindings = {
 
 export type Auth = ReturnType<typeof betterAuth>
 
+export type AuthCreationContext = {
+  firstSetupClaimToken?: string
+}
+
 const logOAuthRegistrationFailure = (error: unknown, providerId: string) => {
   console.error(JSON.stringify(createOAuthRegistrationSecurityEvent(error, { providerId })))
+}
+
+const rejectFirstSetupGuard = (error: unknown): never => {
+  const code = error instanceof FirstSetupError ? error.code : 'SETUP_FAILED'
+  console.error(JSON.stringify(createFirstSetupSecurityEvent(error, { stage: 'guard' })))
+  throw new APIError('UNPROCESSABLE_ENTITY', { code, message: code })
 }
 
 async function resolveOAuthSignupPolicy(db: D1Database): Promise<{
@@ -67,7 +84,8 @@ function resolvePasskeyRp(env: AuthBindings): { rpID: string; rpName: string; or
 
 export async function createAuth(
   env: AuthBindings,
-  oauthProviders?: OAuthProviderRow[]
+  oauthProviders?: OAuthProviderRow[],
+  creationContext: AuthCreationContext = {}
 ) {
   const providers =
     oauthProviders ?? (await listEnabledOAuthProviders(env.DB).catch(() => [] as OAuthProviderRow[]))
@@ -105,6 +123,9 @@ export async function createAuth(
     appName: env.APP_NAME || 'hide-port-tool',
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
+    // Better Auth logs raw hook errors and stacks by default. App-owned security
+    // events below are allowlisted and preserve only a fixed machine code/stage.
+    logger: { disabled: true },
     database: env.DB,
     emailAndPassword: {
       enabled: true,
@@ -117,10 +138,51 @@ export async function createAuth(
       user: {
         create: {
           before: async (user, context) => {
-            // Assign sequential numeric user ids: "1", "2", "3", ...
+            const callback = readGenericOAuthCallback(context)
+            const setupToken = creationContext.firstSetupClaimToken
+
+            if (setupToken && callback) {
+              rejectFirstSetupGuard(new FirstSetupError('SETUP_CLAIM_INVALID'))
+            }
+
+            if (setupToken) {
+              try {
+                await assertFirstSetupClaimActive(env.DB, setupToken)
+              } catch (error) {
+                rejectFirstSetupGuard(error)
+              }
+            } else {
+              try {
+                await assertFirstSetupCompleted(env.DB)
+              } catch (error) {
+                rejectFirstSetupGuard(error)
+              }
+            }
+
+            // Assign sequential numeric user ids only after setup authorization succeeds.
             // createWithHooks uses forceAllowId, so this id is persisted.
             const id = await allocateNextUserId(env.DB)
-            const callback = readGenericOAuthCallback(context)
+
+            if (setupToken) {
+              try {
+                await bindFirstSetupUser(env.DB, {
+                  token: setupToken,
+                  userId: id
+                })
+              } catch (error) {
+                rejectFirstSetupGuard(error)
+              }
+
+              return {
+                data: {
+                  ...user,
+                  id,
+                  role: 'admin',
+                  super_admin: 1
+                }
+              }
+            }
+
             if (callback) {
               try {
                 await authorizeOAuthRegistrationIntent(env.DB, {
