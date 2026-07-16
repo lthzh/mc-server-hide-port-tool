@@ -1,5 +1,7 @@
 ﻿import { afterEach, describe, expect, it, vi } from 'vitest'
+import { hashPassword } from 'better-auth/crypto'
 import app from '../src/index'
+import { createAuth } from '../src/auth'
 import type { Bindings } from '../src/services/cloudflare-dns'
 import {
   authorizeOAuthRegistrationIntent,
@@ -17,6 +19,7 @@ import {
 } from './helpers/d1'
 import {
   AUTH_ORIGIN,
+  cookiesFromHeaders,
   FIXTURE_PROVIDER_ID,
   sameOriginJsonHeaders,
   seedFixtureOAuthProvider,
@@ -88,8 +91,48 @@ async function postJson(env: Bindings, path: string, body: Record<string, unknow
   })
 }
 
+async function postJsonWithHeaders(
+  env: Bindings,
+  path: string,
+  body: Record<string, unknown>,
+  headers: Headers
+) {
+  return await request(env, path, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body)
+  })
+}
+
 async function jsonBody(response: Response): Promise<Record<string, unknown>> {
   return await response.json() as Record<string, unknown>
+}
+
+async function adminHeaders(db: D1Database, env: Bindings, id = 'admin-user'): Promise<Headers> {
+  const email = `${id}@example.test`
+  const password = 'password123'
+  await seedUser(db, { id, email })
+  const now = Date.now()
+  await db.prepare(
+    `INSERT INTO account
+     (id, accountId, providerId, userId, password, createdAt, updatedAt)
+     VALUES (?, ?, 'credential', ?, ?, ?, ?)`
+  ).bind(
+    `${id}-credential`,
+    id,
+    id,
+    await hashPassword(password),
+    now,
+    now
+  ).run()
+  const auth = await createAuth(env)
+  const signIn = await auth.api.signInEmail({
+    headers: sameOriginJsonHeaders(),
+    body: { email, password },
+    asResponse: true
+  })
+  expect(signIn.status).toBe(200)
+  return sameOriginJsonHeaders(`csrf_token=test-csrf; ${cookiesFromHeaders(signIn.headers)}`)
 }
 
 async function intentRows(db: D1Database) {
@@ -507,6 +550,104 @@ describe('OAuth registration routes', { timeout: 15_000 }, () => {
       .toEqual({ count: 0 })
     expect(await db.prepare('SELECT COUNT(*) AS count FROM session').first<{ count: number }>())
       .toEqual({ count: 0 })
+  })
+
+  it('redacts OAuth provider secret from admin create response', async () => {
+    const { db, env } = await setup()
+    await db.prepare('DELETE FROM oauth_provider WHERE provider_id = ?')
+      .bind('private-provider')
+      .run()
+    const headers = await adminHeaders(db, env)
+    const secret = 'private-created-client-secret'
+
+    const response = await postJsonWithHeaders(env, '/api/admin/oauth/create', {
+      provider_id: 'private-provider',
+      name: 'Private Provider',
+      client_id: 'private-client-id',
+      client_secret: secret,
+      authorization_url: 'https://private.example/authorize',
+      token_url: 'https://private.example/token',
+      user_info_url: 'https://private.example/userinfo',
+      scopes: 'openid profile email',
+      pkce: true,
+      enabled: true,
+      sort_order: 10,
+      icon_url: ''
+    }, headers)
+    const text = await response.text()
+    const body = JSON.parse(text) as {
+      success: boolean
+      data?: { provider?: Record<string, unknown> }
+    }
+
+    expect(response.status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.data?.provider).toMatchObject({
+      provider_id: 'private-provider',
+      has_client_secret: true
+    })
+    expect(body.data?.provider).not.toHaveProperty('client_secret')
+    expect(text).not.toContain(secret)
+  })
+
+  it('retains an OAuth provider secret on blank admin update without exposing it', async () => {
+    const { db, env } = await setup()
+    const headers = await adminHeaders(db, env)
+    const originalSecret = 'fixture-client-secret'
+
+    const response = await postJsonWithHeaders(env, '/api/admin/oauth/fixture-provider/update', {
+      provider_id: FIXTURE_PROVIDER_ID,
+      name: 'Fixture OAuth Updated',
+      client_id: 'fixture-client-id-updated',
+      client_secret: '',
+      authorization_url: 'https://provider.example/authorize',
+      token_url: 'https://provider.example/token',
+      user_info_url: 'https://provider.example/userinfo',
+      scopes: 'openid profile email',
+      pkce: false,
+      enabled: true,
+      sort_order: 1,
+      icon_url: ''
+    }, headers)
+    const text = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(text).not.toContain(originalSecret)
+    expect(text).not.toContain('client_secret')
+    expect(await db.prepare(
+      'SELECT client_secret FROM oauth_provider WHERE id = ?'
+    ).bind('fixture-provider').first()).toEqual({ client_secret: originalSecret })
+  })
+
+  it('replaces an OAuth provider secret on admin update without exposing either value', async () => {
+    const { db, env } = await setup()
+    const headers = await adminHeaders(db, env)
+    const originalSecret = 'fixture-client-secret'
+    const nextSecret = 'private-replacement-client-secret'
+
+    const response = await postJsonWithHeaders(env, '/api/admin/oauth/fixture-provider/update', {
+      provider_id: FIXTURE_PROVIDER_ID,
+      name: 'Fixture OAuth Updated',
+      client_id: 'fixture-client-id-updated',
+      client_secret: nextSecret,
+      authorization_url: 'https://provider.example/authorize',
+      token_url: 'https://provider.example/token',
+      user_info_url: 'https://provider.example/userinfo',
+      scopes: 'openid profile email',
+      pkce: false,
+      enabled: true,
+      sort_order: 1,
+      icon_url: ''
+    }, headers)
+    const text = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(text).not.toContain(originalSecret)
+    expect(text).not.toContain(nextSecret)
+    expect(text).not.toContain('client_secret')
+    expect(await db.prepare(
+      'SELECT client_secret FROM oauth_provider WHERE id = ?'
+    ).bind('fixture-provider').first()).toEqual({ client_secret: nextSecret })
   })
 
   it('uses shared cleanup to reconcile an authorized intent whose user exists', async () => {

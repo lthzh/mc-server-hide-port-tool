@@ -83,6 +83,36 @@ async function getPage(env: Bindings, path: string): Promise<Response> {
   return await app.request(`${AUTH_ORIGIN}${path}`, undefined, env)
 }
 
+async function getPageWithHeaders(env: Bindings, path: string, headers: Headers): Promise<Response> {
+  return await app.request(`${AUTH_ORIGIN}${path}`, { headers }, env)
+}
+
+async function signInSeededAdmin(db: D1Database, env: Bindings): Promise<Headers> {
+  const email = 'fixture-admin@example.test'
+  const password = 'password123'
+  const now = Date.now()
+  await db.prepare(
+    `INSERT INTO account
+     (id, accountId, providerId, userId, password, createdAt, updatedAt)
+     VALUES (?, ?, 'credential', ?, ?, ?, ?)`
+  ).bind(
+    'fixture-admin-credential',
+    '9001',
+    '9001',
+    await hashPassword(password),
+    now,
+    now
+  ).run()
+  const auth = await createAuth(env)
+  const signIn = await auth.api.signInEmail({
+    headers: sameOriginJsonHeaders(),
+    body: { email, password },
+    asResponse: true
+  })
+  expect(signIn.status).toBe(200)
+  return new Headers({ cookie: cookiesFromHeaders(signIn.headers) })
+}
+
 type PageSetupStatus = 'open' | 'claimed' | 'claimed-orphan' | 'completed'
 
 async function setupPageState(status: PageSetupStatus) {
@@ -609,6 +639,29 @@ describe('first setup route', { timeout: 30_000 }, () => {
       success: true,
       redirect: '/'
     })
+  })
+
+  it('redacts OAuth provider secrets from admin page data', async () => {
+    const { db, env } = await setupPageState('completed')
+    await seedFixtureOAuthProvider(db)
+    const headers = await signInSeededAdmin(db, env)
+
+    const response = await getPageWithHeaders(env, '/api/pages/admin?tab=oauth', headers)
+    const text = await response.text()
+    const body = JSON.parse(text) as {
+      success: boolean
+      data?: { oauthProviders?: Array<Record<string, unknown>> }
+    }
+
+    expect(response.status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.data?.oauthProviders).toHaveLength(1)
+    expect(body.data?.oauthProviders?.[0]).toMatchObject({
+      provider_id: FIXTURE_PROVIDER_ID,
+      has_client_secret: true
+    })
+    expect(body.data?.oauthProviders?.[0]).not.toHaveProperty('client_secret')
+    expect(text).not.toContain('fixture-client-secret')
   })
 
   it('logs only allowlisted security events and returns only fixed errors', async () => {
