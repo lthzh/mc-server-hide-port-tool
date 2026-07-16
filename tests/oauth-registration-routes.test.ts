@@ -556,19 +556,21 @@ describe('OAuth registration routes', { timeout: 15_000 }, () => {
       .toEqual({ count: 0 })
   })
 
-  it('redacts OAuth provider secret from admin create response', async () => {
+  it('redacts OAuth provider secrets from admin mutations while preserving runtime use', async () => {
     const { db, env } = await setup()
     await db.prepare('DELETE FROM oauth_provider WHERE provider_id = ?')
       .bind('private-provider')
       .run()
     const headers = await adminHeaders(db, env)
-    const secret = 'private-created-client-secret'
+    const createdSecret = 'private-created-client-secret'
+    const originalSecret = 'fixture-client-secret'
+    const nextSecret = 'private-replacement-client-secret'
 
-    const response = await postJsonWithHeaders(env, '/api/admin/oauth/create', {
+    const createResponse = await postJsonWithHeaders(env, '/api/admin/oauth/create', {
       provider_id: 'private-provider',
       name: 'Private Provider',
       client_id: 'private-client-id',
-      client_secret: secret,
+      client_secret: createdSecret,
       authorization_url: 'https://private.example/authorize',
       token_url: 'https://private.example/token',
       user_info_url: 'https://private.example/userinfo',
@@ -578,28 +580,22 @@ describe('OAuth registration routes', { timeout: 15_000 }, () => {
       sort_order: 10,
       icon_url: ''
     }, headers)
-    const text = await response.text()
-    const body = JSON.parse(text) as {
+    const createText = await createResponse.text()
+    const createBody = JSON.parse(createText) as {
       success: boolean
       data?: { provider?: Record<string, unknown> }
     }
 
-    expect(response.status).toBe(200)
-    expect(body.success).toBe(true)
-    expect(body.data?.provider).toMatchObject({
+    expect(createResponse.status).toBe(200)
+    expect(createBody.success).toBe(true)
+    expect(createBody.data?.provider).toMatchObject({
       provider_id: 'private-provider',
       has_client_secret: true
     })
-    expect(body.data?.provider).not.toHaveProperty('client_secret')
-    expect(text).not.toContain(secret)
-  })
+    expect(createBody.data?.provider).not.toHaveProperty('client_secret')
+    expect(createText).not.toContain(createdSecret)
 
-  it('retains an OAuth provider secret on blank admin update without exposing it', async () => {
-    const { db, env } = await setup()
-    const headers = await adminHeaders(db, env)
-    const originalSecret = 'fixture-client-secret'
-
-    const response = await postJsonWithHeaders(env, '/api/admin/oauth/fixture-provider/update', {
+    const retainResponse = await postJsonWithHeaders(env, '/api/admin/oauth/fixture-provider/update', {
       provider_id: FIXTURE_PROVIDER_ID,
       name: 'Fixture OAuth Updated',
       client_id: 'fixture-client-id-updated',
@@ -613,23 +609,16 @@ describe('OAuth registration routes', { timeout: 15_000 }, () => {
       sort_order: 1,
       icon_url: ''
     }, headers)
-    const text = await response.text()
+    const retainText = await retainResponse.text()
 
-    expect(response.status).toBe(200)
-    expect(text).not.toContain(originalSecret)
-    expect(text).not.toContain('client_secret')
+    expect(retainResponse.status).toBe(200)
+    expect(retainText).not.toContain(originalSecret)
+    expect(retainText).not.toContain('client_secret')
     expect(await db.prepare(
       'SELECT client_secret FROM oauth_provider WHERE id = ?'
     ).bind('fixture-provider').first()).toEqual({ client_secret: originalSecret })
-  })
 
-  it('replaces an OAuth provider secret on admin update without exposing either value', async () => {
-    const { db, env } = await setup()
-    const headers = await adminHeaders(db, env)
-    const originalSecret = 'fixture-client-secret'
-    const nextSecret = 'private-replacement-client-secret'
-
-    const response = await postJsonWithHeaders(env, '/api/admin/oauth/fixture-provider/update', {
+    const replaceResponse = await postJsonWithHeaders(env, '/api/admin/oauth/fixture-provider/update', {
       provider_id: FIXTURE_PROVIDER_ID,
       name: 'Fixture OAuth Updated',
       client_id: 'fixture-client-id-updated',
@@ -643,25 +632,20 @@ describe('OAuth registration routes', { timeout: 15_000 }, () => {
       sort_order: 1,
       icon_url: ''
     }, headers)
-    const text = await response.text()
+    const replaceText = await replaceResponse.text()
 
-    expect(response.status).toBe(200)
-    expect(text).not.toContain(originalSecret)
-    expect(text).not.toContain(nextSecret)
-    expect(text).not.toContain('client_secret')
+    expect(replaceResponse.status).toBe(200)
+    expect(replaceText).not.toContain(originalSecret)
+    expect(replaceText).not.toContain(nextSecret)
+    expect(replaceText).not.toContain('client_secret')
     expect(await db.prepare(
       'SELECT client_secret FROM oauth_provider WHERE id = ?'
     ).bind('fixture-provider').first()).toEqual({ client_secret: nextSecret })
-  })
 
-  it('keeps runtime OAuth config backed by the stored client secret', async () => {
-    const { db } = await setup()
     const row = await findOAuthProviderByProviderId(db, FIXTURE_PROVIDER_ID)
     expect(row).not.toBeNull()
-
     const config = toGenericOAuthConfig(row!, db) as { clientSecret?: string }
-
-    expect(config.clientSecret).toBe('fixture-client-secret')
+    expect(config.clientSecret).toBe(nextSecret)
   })
 
   it('uses shared cleanup to reconcile an authorized intent whose user exists', async () => {
