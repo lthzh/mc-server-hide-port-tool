@@ -4,6 +4,10 @@ import app from '../src/index'
 import { createAuth } from '../src/auth'
 import type { Bindings } from '../src/services/cloudflare-dns'
 import {
+  findOAuthProviderByProviderId,
+  toGenericOAuthConfig
+} from '../src/services/oauth-providers'
+import {
   authorizeOAuthRegistrationIntent,
   bindOAuthRegistrationIntentState,
   createOAuthRegistrationIntent
@@ -648,6 +652,16 @@ describe('OAuth registration routes', { timeout: 15_000 }, () => {
     expect(await db.prepare(
       'SELECT client_secret FROM oauth_provider WHERE id = ?'
     ).bind('fixture-provider').first()).toEqual({ client_secret: nextSecret })
+  })
+
+  it('keeps runtime OAuth config backed by the stored client secret', async () => {
+    const { db } = await setup()
+    const row = await findOAuthProviderByProviderId(db, FIXTURE_PROVIDER_ID)
+    expect(row).not.toBeNull()
+
+    const config = toGenericOAuthConfig(row!, db) as { clientSecret?: string }
+
+    expect(config.clientSecret).toBe('fixture-client-secret')
   })
 
   it('uses shared cleanup to reconcile an authorized intent whose user exists', async () => {
