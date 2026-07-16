@@ -26,7 +26,7 @@ import {
   setOAuthProviderEnabled,
   updateOAuthProvider
 } from '../services/oauth-providers'
-import { deleteRecordAndCloudflare, type Bindings } from '../services/cloudflare-dns'
+import { deleteRecordAndCloudflare, toDnsFailureEvent, type Bindings } from '../services/cloudflare-dns'
 import { splitCsv, withoutSetCookieHeaders } from '../lib/http'
 import {
   apiErr,
@@ -35,6 +35,10 @@ import {
   requireJsonMutation
 } from '../lib/api'
 import { maskUsersForAdmin } from '../lib/privacy'
+import {
+  DNS_GENERIC_SAFE_MESSAGE,
+  logDnsExternalServiceFailure
+} from '../lib/external-service-security'
 
 function asBool(v: unknown): boolean {
   if (typeof v === 'boolean') return v
@@ -175,12 +179,17 @@ export function registerAdminRoutes(app: Hono<{ Bindings: Bindings }>) {
     }
     if (await isSuperAdmin(c.env.DB, id)) return apiErr(c, "不能删除超级管理员", 403)
 
-    const records = await listRecordsByUser(c.env.DB, id)
-    for (const r of records) {
-      await deleteRecordAndCloudflare(c.env, r)
+    try {
+      const records = await listRecordsByUser(c.env.DB, id)
+      for (const r of records) {
+        await deleteRecordAndCloudflare(c.env, r)
+      }
+      await deleteUserCascade(c.env.DB, id)
+      return apiOk(c, undefined, { message: "用户已删除" })
+    } catch (err) {
+      logDnsExternalServiceFailure(toDnsFailureEvent(err, 'record_delete'))
+      return apiErr(c, DNS_GENERIC_SAFE_MESSAGE, 500)
     }
-    await deleteUserCascade(c.env.DB, id)
-    return apiOk(c, undefined, { message: "用户已删除" })
   })
 
   app.post('/api/admin/users/:id/limit', async (c) => {
@@ -254,12 +263,17 @@ export function registerAdminRoutes(app: Hono<{ Bindings: Bindings }>) {
     const admin = await requireAdmin(c.env, c.req.raw.headers)
     if (!admin) return apiErr(c, "无权限", 403)
 
-    const id = c.req.param('id')
-    const record = await findRecordById(c.env.DB, id)
-    if (record) {
-      await deleteRecordAndCloudflare(c.env, record)
+    try {
+      const id = c.req.param('id')
+      const record = await findRecordById(c.env.DB, id)
+      if (record) {
+        await deleteRecordAndCloudflare(c.env, record)
+      }
+      return apiOk(c, undefined, { message: "DNS 记录已删除" })
+    } catch (err) {
+      logDnsExternalServiceFailure(toDnsFailureEvent(err, 'record_delete'))
+      return apiErr(c, DNS_GENERIC_SAFE_MESSAGE, 500)
     }
-    return apiOk(c, undefined, { message: "DNS 记录已删除" })
   })
 
   app.post('/api/admin/invites/create', async (c) => {

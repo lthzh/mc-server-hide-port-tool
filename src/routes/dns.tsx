@@ -22,10 +22,17 @@ import {
   getCloudflareApiToken,
   parseCreateDnsRequest,
   parseUpdateDnsRequest,
+  toDnsFailureEvent,
   updateDnsRecord,
   type Bindings
 } from '../services/cloudflare-dns'
 import { isSameOriginMutation, verifyCsrfToken } from '../lib/security'
+import {
+  DNS_CONFIG_SAFE_MESSAGE,
+  DNS_GENERIC_SAFE_MESSAGE,
+  logDnsExternalServiceFailure,
+  safeDnsClientMessage
+} from '../lib/external-service-security'
 
 
 async function requireDnsMutationAuth(c: any): Promise<Response | null> {
@@ -38,6 +45,16 @@ async function requireDnsMutationAuth(c: any): Promise<Response | null> {
     return c.json({ success: false, message: 'Forbidden: invalid CSRF token' }, 403)
   }
   return null
+}
+
+function dnsExternalErrorResponse(
+  c: any,
+  error: unknown,
+  fallbackStage: Parameters<typeof toDnsFailureEvent>[1]
+): Response {
+  const event = toDnsFailureEvent(error, fallbackStage)
+  logDnsExternalServiceFailure(event)
+  return c.json({ success: false, message: safeDnsClientMessage(event.code) }, 500)
 }
 
 export function registerDnsRoutes(app: Hono<{ Bindings: Bindings }>) {
@@ -79,7 +96,8 @@ export function registerDnsRoutes(app: Hono<{ Bindings: Bindings }>) {
       const domains = getAllowedDomains(c.env)
 
       if (domains.length === 0) {
-        return c.json({ success: false, message: '后端未配置可用根域名 DOMAINS' }, 500)
+        logDnsExternalServiceFailure({ code: 'DNS_CONFIG_MISSING', stage: 'config' })
+        return c.json({ success: false, message: DNS_CONFIG_SAFE_MESSAGE }, 500)
       }
 
       const request = parseCreateDnsRequest(body, domains)
@@ -90,13 +108,8 @@ export function registerDnsRoutes(app: Hono<{ Bindings: Bindings }>) {
       const { subdomain, rootDomain, serverAddress, port, targetRecordType } = request.value
       const token = getCloudflareApiToken(c.env, rootDomain)
       if (!token) {
-        return c.json(
-          {
-            success: false,
-            message: '后端未配置根域名 ' + rootDomain + ' 对应的 CLOUDFLARE_API_TOKEN'
-          },
-          500
-        )
+        logDnsExternalServiceFailure({ code: 'DNS_CONFIG_MISSING', stage: 'config' })
+        return c.json({ success: false, message: DNS_CONFIG_SAFE_MESSAGE }, 500)
       }
 
       const settings = await getSettings(c.env.DB)
@@ -219,38 +232,42 @@ export function registerDnsRoutes(app: Hono<{ Bindings: Bindings }>) {
         throw err
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : '请求处理失败'
-      return c.json({ success: false, message }, 500)
+      return dnsExternalErrorResponse(c, err, 'record_create')
     }
   })
 
   app.post('/api/dns/:id/delete', async (c) => {
-    const session = await getCurrentSession(c.env, c.req.raw.headers)
-    if (!session) {
-      return c.json({ success: false, message: '未登录，请先登录' }, 401)
+    try {
+      const session = await getCurrentSession(c.env, c.req.raw.headers)
+      if (!session) {
+        return c.json({ success: false, message: '未登录，请先登录' }, 401)
+      }
+      const csrfDenied = await requireDnsMutationAuth(c)
+      if (csrfDenied) return csrfDenied
+      const id = c.req.param('id')
+      const record = await findRecordById(c.env.DB, id)
+      if (!record) {
+        return c.json({ success: false, message: '记录不存在' }, 404)
+      }
+      if (record.user_id !== session.user.id) {
+        return c.json({ success: false, message: '无权删除该记录' }, 403)
+      }
+      await deleteRecordAndCloudflare(c.env, record)
+      const currentCount = await countRecordsByUser(c.env.DB, session.user.id)
+      const settings = await getSettings(c.env.DB)
+      const userRow = await findUserById(c.env.DB, session.user.id)
+      const recordLimit = resolveUserRecordLimit(userRow, settings.max_records_per_user)
+      return c.json({
+        success: true,
+        message: '记录已删除',
+        id,
+        record_count: currentCount,
+        record_limit: recordLimit
+      })
+    } catch (err) {
+      logDnsExternalServiceFailure(toDnsFailureEvent(err, 'record_delete'))
+      return c.json({ success: false, message: DNS_GENERIC_SAFE_MESSAGE }, 500)
     }
-    const csrfDenied = await requireDnsMutationAuth(c)
-    if (csrfDenied) return csrfDenied
-    const id = c.req.param('id')
-    const record = await findRecordById(c.env.DB, id)
-    if (!record) {
-      return c.json({ success: false, message: '记录不存在' }, 404)
-    }
-    if (record.user_id !== session.user.id) {
-      return c.json({ success: false, message: '无权删除该记录' }, 403)
-    }
-    await deleteRecordAndCloudflare(c.env, record)
-    const currentCount = await countRecordsByUser(c.env.DB, session.user.id)
-    const settings = await getSettings(c.env.DB)
-    const userRow = await findUserById(c.env.DB, session.user.id)
-    const recordLimit = resolveUserRecordLimit(userRow, settings.max_records_per_user)
-    return c.json({
-      success: true,
-      message: '记录已删除',
-      id,
-      record_count: currentCount,
-      record_limit: recordLimit
-    })
   })
 
   app.post('/api/dns/:id/update', async (c) => {
@@ -296,13 +313,8 @@ export function registerDnsRoutes(app: Hono<{ Bindings: Bindings }>) {
 
       const token = getCloudflareApiToken(c.env, record.root_domain)
       if (!token) {
-        return c.json(
-          {
-            success: false,
-            message: '后端未配置根域名 ' + record.root_domain + ' 对应的 CLOUDFLARE_API_TOKEN'
-          },
-          500
-        )
+        logDnsExternalServiceFailure({ code: 'DNS_CONFIG_MISSING', stage: 'config' })
+        return c.json({ success: false, message: DNS_CONFIG_SAFE_MESSAGE }, 500)
       }
 
       const zoneId = await fetchZoneId(token, record.root_domain)
@@ -375,8 +387,7 @@ export function registerDnsRoutes(app: Hono<{ Bindings: Bindings }>) {
         throw err
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : '请求处理失败'
-      return c.json({ success: false, message }, 500)
+      return dnsExternalErrorResponse(c, err, 'record_update')
     }
   })
 }

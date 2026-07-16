@@ -1,5 +1,11 @@
 import type { DnsRecordRow } from './dns-records'
 import { deleteRecordRow } from './dns-records'
+import {
+  logDnsExternalServiceFailure,
+  type DnsExternalFailureEventInput,
+  type DnsExternalFailureCode,
+  type DnsExternalFailureStage
+} from '../lib/external-service-security'
 
 export type Bindings = CloudflareBindings & {
   BETTER_AUTH_SECRET?: string
@@ -33,6 +39,54 @@ type CloudflareDnsRecord = {
   content?: string
 }
 
+export class CloudflareDnsError extends Error {
+  readonly code: DnsExternalFailureCode
+  readonly stage: DnsExternalFailureStage
+  readonly status?: number
+  readonly retriable: boolean
+
+  constructor(input: {
+    code: DnsExternalFailureCode
+    stage: DnsExternalFailureStage
+    status?: number
+    retriable?: boolean
+  }) {
+    super(input.code)
+    this.name = 'CloudflareDnsError'
+    this.code = input.code
+    this.stage = input.stage
+    this.status = input.status
+    this.retriable = !!input.retriable
+  }
+}
+
+export function isCloudflareDnsError(error: unknown): error is CloudflareDnsError {
+  return error instanceof CloudflareDnsError
+}
+
+export function toDnsFailureEvent(
+  error: unknown,
+  fallbackStage: DnsExternalFailureStage
+): DnsExternalFailureEventInput {
+  if (isCloudflareDnsError(error)) {
+    return {
+      code: error.code,
+      stage: error.stage,
+      status: error.status,
+      retriable: error.retriable
+    }
+  }
+  return {
+    code: 'DNS_EXTERNAL_FAILURE',
+    stage: fallbackStage,
+    retriable: false
+  }
+}
+
+function isRetriableCloudflareStatus(status: number): boolean {
+  return status === 408 || status === 409 || status === 429 || status >= 500
+}
+
 type DnsRecordBody =
   | {
       type: 'A' | 'AAAA' | 'CNAME'
@@ -58,15 +112,26 @@ export async function deleteRecordAndCloudflare(
   record: DnsRecordRow
 ): Promise<void> {
   const token = getCloudflareApiToken(env, record.root_domain)
-  if (token) {
-    const zoneId = await fetchZoneId(token, record.root_domain).catch(() => null)
-    if (zoneId) {
-      await deleteCloudflareDnsRecord(token, zoneId, record.target_record_id).catch(() => {})
-      if (record.srv_record_id) {
-        await deleteCloudflareDnsRecord(token, zoneId, record.srv_record_id).catch(() => {})
-      }
-    }
+  if (!token) {
+    logDnsExternalServiceFailure({ code: 'DNS_CONFIG_MISSING', stage: 'record_delete' })
+    await deleteRecordRow(env.DB, record.id)
+    return
   }
+
+  try {
+    const zoneId = await fetchZoneId(token, record.root_domain)
+    await deleteCloudflareDnsRecord(token, zoneId, record.target_record_id).catch((error) => {
+      logDnsExternalServiceFailure(toDnsFailureEvent(error, 'record_delete'))
+    })
+    if (record.srv_record_id) {
+      await deleteCloudflareDnsRecord(token, zoneId, record.srv_record_id).catch((error) => {
+        logDnsExternalServiceFailure(toDnsFailureEvent(error, 'record_delete'))
+      })
+    }
+  } catch (error) {
+    logDnsExternalServiceFailure(toDnsFailureEvent(error, 'record_delete'))
+  }
+
   await deleteRecordRow(env.DB, record.id)
 }
 
@@ -77,7 +142,7 @@ export async function deleteCloudflareDnsRecord(
 ): Promise<void> {
   if (!recordId) return
   const url = `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records/${recordId}`
-  await sendCloudflareRequest(token, url, { method: 'DELETE' })
+  await sendCloudflareRequest(token, url, { method: 'DELETE' }, 'record_delete')
 }
 
 export async function cleanupCloudflareDnsRecords(
@@ -86,7 +151,9 @@ export async function cleanupCloudflareDnsRecords(
   recordIds: Array<string | null | undefined>
 ): Promise<void> {
   const unique = [...new Set(recordIds.filter((id): id is string => !!id))]
-  await Promise.all(unique.map((id) => deleteCloudflareDnsRecord(token, zoneId, id).catch(() => {})))
+  await Promise.all(unique.map((id) => deleteCloudflareDnsRecord(token, zoneId, id).catch((error) => {
+    logDnsExternalServiceFailure(toDnsFailureEvent(error, 'cleanup'))
+  })))
 }
 
 
@@ -298,13 +365,13 @@ function isValidDomainLabel(value: string): boolean {
 
 export async function fetchZoneId(token: string, domain: string): Promise<string> {
   const url = `https://api.cloudflare.com/client/v4/zones?name=${encodeURIComponent(domain)}`
-  const data = await sendCloudflareRequest<CloudflareListResult<CloudflareZone>>(token, url)
+  const data = await sendCloudflareRequest<CloudflareListResult<CloudflareZone>>(token, url, {}, 'zone_lookup')
 
   if (data.success && data.result.length > 0) {
     return data.result[0].id
   }
 
-  throw new Error(`未能在 Cloudflare 账户中找到域名 ${domain}`)
+  throw new CloudflareDnsError({ code: 'CLOUDFLARE_ZONE_NOT_FOUND', stage: 'zone_lookup' })
 }
 
 export async function findOccupiedRecords(
@@ -327,10 +394,10 @@ async function findDnsRecordsByName(
     per_page: '100'
   })
   const url = `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records?${params}`
-  const data = await sendCloudflareRequest<CloudflareListResult<CloudflareDnsRecord>>(token, url)
+  const data = await sendCloudflareRequest<CloudflareListResult<CloudflareDnsRecord>>(token, url, {}, 'record_lookup')
 
   if (!data.success) {
-    throw new Error(getCloudflareErrorMessage(data.errors))
+    throw new CloudflareDnsError({ code: 'DNS_EXTERNAL_FAILURE', stage: 'record_lookup' })
   }
 
   return data.result
@@ -347,10 +414,10 @@ export async function updateDnsRecord(
   const data = await sendCloudflareRequest<CloudflareSingleResult<CloudflareDnsRecord>>(token, url, {
     method: 'PUT',
     body: JSON.stringify(body)
-  })
+  }, 'record_update')
 
   if (!data.success) {
-    throw new Error(getCloudflareErrorMessage(data.errors))
+    throw new CloudflareDnsError({ code: 'DNS_EXTERNAL_FAILURE', stage: 'record_update' })
   }
 
   return data.result
@@ -405,10 +472,10 @@ export async function createDnsRecord(
   const data = await sendCloudflareRequest<CloudflareSingleResult<CloudflareDnsRecord>>(token, url, {
     method: 'POST',
     body: JSON.stringify(body)
-  })
+  }, 'record_create')
 
   if (!data.success) {
-    throw new Error(getCloudflareErrorMessage(data.errors))
+    throw new CloudflareDnsError({ code: 'DNS_EXTERNAL_FAILURE', stage: 'record_create' })
   }
 
   return data.result
@@ -417,7 +484,8 @@ export async function createDnsRecord(
 async function sendCloudflareRequest<T>(
   token: string,
   url: string,
-  init: RequestInit = {}
+  init: RequestInit = {},
+  stage: DnsExternalFailureStage
 ): Promise<T> {
   const headers = new Headers(init.headers)
   headers.set('Authorization', `Bearer ${token}`)
@@ -431,11 +499,12 @@ async function sendCloudflareRequest<T>(
   const data = parseJsonResponse<T>(text)
 
   if (!response.ok) {
-    const message =
-      isCloudflareErrorResponse(data) && data.errors
-        ? getCloudflareErrorMessage(data.errors)
-        : text || 'Cloudflare 返回非 JSON 错误'
-    throw new Error(`Cloudflare API 请求失败: ${response.status} ${message}`)
+    throw new CloudflareDnsError({
+      code: 'CLOUDFLARE_REQUEST_FAILED',
+      stage,
+      status: response.status,
+      retriable: isRetriableCloudflareStatus(response.status)
+    })
   }
 
   return data
@@ -456,4 +525,3 @@ function isCloudflareErrorResponse(value: unknown): value is { errors?: Cloudfla
 function getCloudflareErrorMessage(errors: CloudflareError[] | undefined): string {
   return errors?.map((error) => error.message).filter(Boolean).join('; ') || 'Cloudflare 返回未知错误'
 }
-
