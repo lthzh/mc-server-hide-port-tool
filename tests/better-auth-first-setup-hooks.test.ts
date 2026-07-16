@@ -10,6 +10,7 @@ import {
 } from '../src/services/first-setup'
 import {
   createTestD1,
+  disposeTestD1Instances,
   markFirstSetupCompleted,
   type TestD1
 } from './helpers/d1'
@@ -27,7 +28,7 @@ const instances: TestD1[] = []
 
 afterEach(async () => {
   vi.restoreAllMocks()
-  await Promise.all(instances.splice(0).map((item) => item.dispose()))
+  await disposeTestD1Instances(instances)
 })
 
 async function setupOpen() {

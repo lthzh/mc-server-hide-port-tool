@@ -48,6 +48,12 @@ export async function createTestD1(options: MigrationOptions = {}): Promise<Test
   return { db, dispose: async () => mf.dispose() }
 }
 
+export async function disposeTestD1Instances(instances: TestD1[]): Promise<void> {
+  for (const instance of instances.splice(0)) {
+    await instance.dispose()
+  }
+}
+
 export async function markFirstSetupCompleted(db: D1Database): Promise<void> {
   await db.prepare(
     `UPDATE first_setup

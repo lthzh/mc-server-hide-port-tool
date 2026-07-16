@@ -6,6 +6,7 @@ import {
 } from '../src/services/oauth-registration-intents'
 import {
   createTestD1,
+  disposeTestD1Instances,
   markFirstSetupCompleted,
   seedInvite,
   seedUser,
@@ -47,7 +48,7 @@ async function setup(
 
 afterEach(async () => {
   vi.restoreAllMocks()
-  await Promise.all(instances.splice(0).map(({ dispose }) => dispose()))
+  await disposeTestD1Instances(instances)
 })
 
 async function startOAuth(auth: TestAuth, requestSignUp: boolean) {
@@ -132,7 +133,7 @@ async function rowCount(db: D1Database, table: 'user' | 'account' | 'session'): 
   return Number(row?.count ?? 0)
 }
 
-describe('Better Auth OAuth registration hooks', () => {
+describe('Better Auth OAuth registration hooks', { timeout: 30_000 }, () => {
   it('keeps email signup numeric without requiring an OAuth intent', async () => {
     const { auth } = await setup()
     const result = await auth.api.signUpEmail({

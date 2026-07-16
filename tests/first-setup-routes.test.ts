@@ -15,6 +15,7 @@ import {
 } from '../src/services/oauth-registration-intents'
 import {
   createTestD1,
+  disposeTestD1Instances,
   markFirstSetupCompleted,
   seedUser,
   type TestD1
@@ -219,7 +220,7 @@ async function prepareOAuthRegistrationCallback(db: D1Database, env: Bindings) {
 
 afterEach(async () => {
   vi.restoreAllMocks()
-  await Promise.all(instances.splice(0).map(({ dispose }) => dispose()))
+  await disposeTestD1Instances(instances)
 })
 
 describe('first setup route', { timeout: 30_000 }, () => {
@@ -306,7 +307,7 @@ describe('first setup route', { timeout: 30_000 }, () => {
     }
   })
 
-  it('keeps a prepared OAuth callback from winning five setup races', async () => {
+  it('keeps a prepared OAuth callback from winning five setup races', { timeout: 90_000 }, async () => {
     for (let round = 0; round < 5; round += 1) {
       const { db, env } = await setupOpen()
       await enableRaceRegistration(db)

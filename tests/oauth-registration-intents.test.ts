@@ -1,5 +1,11 @@
 ﻿import { afterEach, describe, expect, it } from 'vitest'
-import { createTestD1, seedInvite, seedUser, type TestD1 } from './helpers/d1'
+import {
+  createTestD1,
+  disposeTestD1Instances,
+  seedInvite,
+  seedUser,
+  type TestD1
+} from './helpers/d1'
 import {
   assertInviteCodeAvailable,
   consumeInviteCode,
@@ -32,7 +38,7 @@ async function database(): Promise<D1Database> {
 }
 
 afterEach(async () => {
-  await Promise.all(instances.splice(0).map(({ dispose }) => dispose()))
+  await disposeTestD1Instances(instances)
 })
 
 async function insertIntent(

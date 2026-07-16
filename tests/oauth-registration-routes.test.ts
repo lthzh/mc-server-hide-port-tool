@@ -9,6 +9,7 @@ import {
 import { claimFirstSetup } from '../src/services/first-setup'
 import {
   createTestD1,
+  disposeTestD1Instances,
   markFirstSetupCompleted,
   seedInvite,
   seedUser,
@@ -68,7 +69,7 @@ async function setupUninitialized(status: 'open' | 'claimed') {
 
 afterEach(async () => {
   vi.restoreAllMocks()
-  await Promise.all(instances.splice(0).map(({ dispose }) => dispose()))
+  await disposeTestD1Instances(instances)
 })
 
 async function request(

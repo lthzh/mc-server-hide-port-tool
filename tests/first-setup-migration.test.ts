@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   applyMigrationFile,
   createTestD1,
+  disposeTestD1Instances,
   markFirstSetupCompleted,
   type TestD1
 } from './helpers/d1'
@@ -11,7 +12,7 @@ import {
 const instances: TestD1[] = []
 
 afterEach(async () => {
-  await Promise.all(instances.splice(0).map((item) => item.dispose()))
+  await disposeTestD1Instances(instances)
 })
 
 async function createThrough0010(): Promise<TestD1> {
