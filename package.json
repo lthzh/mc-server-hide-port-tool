@@ -3,9 +3,10 @@
   "type": "module",
   "scripts": {
     "build:css": "tailwindcss -c tailwind.config.cjs -i ./src/styles/app.css -o ./public/static/app.css --minify",
-    "build": "pnpm run build:css",
+    "build:vendor": "node scripts/build-browser-assets.cjs",
+    "build": "pnpm run build:css && pnpm run build:vendor",
     "validate:migrations": "node scripts/validate-production-migrations.cjs",
-    "predev": "pnpm run build:css",
+    "predev": "pnpm run build",
     "dev": "wrangler dev",
     "predeploy": "pnpm run build",
     "deploy": "wrangler deploy --minify",
@@ -15,6 +16,7 @@
   },
   "dependencies": {
     "@better-auth/passkey": "1.6.23",
+    "@simplewebauthn/browser": "13.3.0",
     "better-auth": "1.6.23",
     "hono": "^4.12.27"
   },

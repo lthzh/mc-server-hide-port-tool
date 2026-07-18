@@ -10,7 +10,7 @@ import {
   qs,
   showAppError
 } from './app-core.js';
-import { startRegistration } from 'https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13.2.2/+esm';
+import { startRegistration } from './vendor/simplewebauthn-browser.js';
 
 function alertBox(type, message) {
   if (!message) return '';

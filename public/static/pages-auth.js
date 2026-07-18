@@ -8,7 +8,7 @@ import {
   qs,
   showAppError
 } from './app-core.js';
-import { startAuthentication } from 'https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13.2.2/+esm';
+import { startAuthentication } from './vendor/simplewebauthn-browser.js';
 
 function alertBox(type, message) {
   if (!message) return '';
