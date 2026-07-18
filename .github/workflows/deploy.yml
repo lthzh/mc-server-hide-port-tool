@@ -108,7 +108,7 @@ jobs:
           preCommands: |
             node scripts/ensure-d1-and-writeback.cjs
             node scripts/patch-custom-domain.cjs
-            npx wrangler d1 migrations apply mc-server-hide-port-tool-db --remote
+            pnpm exec wrangler d1 migrations apply mc-server-hide-port-tool-db --remote
           command: deploy --minify
           vars: ${{ steps.lists.outputs.vars }}
           secrets: ${{ steps.lists.outputs.secrets }}

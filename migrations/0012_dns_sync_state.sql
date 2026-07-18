@@ -19,10 +19,14 @@ CREATE INDEX IF NOT EXISTS "dns_record_sync_status_updated_index"
 
 CREATE TRIGGER IF NOT EXISTS "dns_record_sync_status_valid_insert"
 BEFORE INSERT ON "dns_record" WHEN NEW."sync_status" NOT IN ('creating', 'active', 'updating', 'error')
-BEGIN SELECT RAISE(ABORT, 'invalid dns sync status'); END;
+BEGIN
+  SELECT RAISE(ABORT, 'invalid dns sync status');
+END;
 
 CREATE TRIGGER IF NOT EXISTS "dns_record_sync_status_valid_update"
 BEFORE UPDATE OF "sync_status" ON "dns_record" WHEN NEW."sync_status" NOT IN ('creating', 'active', 'updating', 'error')
-BEGIN SELECT RAISE(ABORT, 'invalid dns sync status'); END;
+BEGIN
+  SELECT RAISE(ABORT, 'invalid dns sync status');
+END;
 -- Verification throttles are ephemeral; remove legacy rows whose keys contained raw email/IP values.
 DELETE FROM "rate_limit_bucket" WHERE "key" LIKE 'email_verify_fail:%';
