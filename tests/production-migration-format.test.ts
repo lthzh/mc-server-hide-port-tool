@@ -21,6 +21,7 @@ describe('production migration execution', () => {
       expect(sql).toMatch(/^CREATE TRIGGER IF NOT EXISTS\b/)
       expect(sql).toMatch(/\bBEGIN\b.*\bEND;$/)
       expect(sql).not.toMatch(/[\r\n]/)
+      expect(sql).not.toMatch(/SELECT\s+CASE\b/i)
     }
   })
 
